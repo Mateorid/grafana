@@ -7,8 +7,8 @@
   },
   "command-palette": {
     "action": {
-      "change-theme": "",
       "dark-theme": "",
+      "change-theme": "",
       "light-theme": "",
       "search": ""
     },
@@ -142,15 +142,15 @@
       "subtitle": "Lege fest, wie Warnungen an Kontaktpunkte weitergeleitet werden",
       "title": "Benachrichtigungsrichtlinien"
     },
-    "alerting-channels": {
-      "title": "Benachrichtigungskanäle"
-    },
     "alerting-groups": {
       "subtitle": "Zeige gruppierte Warnungen vom Alertmanager an",
       "title": "Gruppen"
     },
     "alerting-home": {
       "title": "Home"
+    },
+    "alerting-channels": {
+      "title": "Benachrichtigungskanäle"
     },
     "alerting-legacy": {
       "title": "Warnungen (Legacy)"
@@ -374,8 +374,8 @@
   },
   "refresh-picker": {
     "aria-label": {
-      "choose-interval": "Automatische Aktualisierung ausgeschaltet. Aktualisierungszeitintervall auswählen",
-      "duration-selected": "Aktualisierungszeitintervall mit aktuellem Intervall {{durationAriaLabel}} ausgewählt"
+      "duration-selected": "Aktualisierungszeitintervall mit aktuellem Intervall {{durationAriaLabel}} ausgewählt",
+      "choose-interval": "Automatische Aktualisierung ausgeschaltet. Aktualisierungszeitintervall auswählen"
     },
     "live-option": {
       "aria-label": "Live-Streaming einschalten",
@@ -509,9 +509,9 @@
       "filter-placeholder": "Schnellbereiche suchen"
     },
     "footer": {
-      "change-settings-button": "Zeiteinstellungen ändern",
       "fiscal-year-option": "Geschäftsjahr",
       "fiscal-year-start": "Startmonat Geschäftsjahr",
+      "change-settings-button": "Zeiteinstellungen ändern",
       "time-zone-option": "Zeitzone",
       "time-zone-selection": "Zeitzonenauswahl"
     },
