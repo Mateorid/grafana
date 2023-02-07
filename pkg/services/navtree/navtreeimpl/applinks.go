@@ -83,6 +83,8 @@ func (s *ServiceImpl) processAppPlugin(plugin plugins.PluginDTO, c *contextmodel
 		appLink.Url = path.Join(s.cfg.AppSubURL, plugin.DefaultNavURL)
 	}
 
+	var index = 0 //ADDED
+
 	for _, include := range plugin.Includes {
 		if !hasAccessToInclude(include) {
 			continue
@@ -143,10 +145,13 @@ func (s *ServiceImpl) processAppPlugin(plugin plugins.PluginDTO, c *contextmodel
 					Url:      path.Join(s.cfg.AppSubURL, dboardURL),
 					Text:     include.Name,
 					PluginID: plugin.ID,
+					Id:       include.UID,
 				}
 				appLink.Children = append(appLink.Children, link)
 			}
+			index++ //ADDED
 		}
+
 	}
 
 	// Apps without any nav children are not part of navtree

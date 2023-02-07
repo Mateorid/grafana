@@ -5,6 +5,17 @@
       "success": "Zkopírováno"
     }
   },
+  "skoda-plugin": {
+    "dashboards": "Škoda-PREMIS",
+    "main": "Domů",
+    "fleet": "Flotila",
+    "vehicle": "Vozidlo",
+    "vehicle-unit": "Člen",
+    "alerts": "Hlášení",
+    "signals": "Signály",
+    "boogie-diag": "Boogie diagnostika",
+    "energy-consumption": "Spotřeba energie"
+  },
   "command-palette": {
     "action": {
       "dark-theme": "Tmavý",
