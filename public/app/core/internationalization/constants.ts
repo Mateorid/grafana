@@ -5,6 +5,7 @@ export const FRENCH_FRANCE = 'fr-FR';
 export const SPANISH_SPAIN = 'es-ES';
 export const GERMAN_GERMANY = 'de-DE';
 export const CHINESE_SIMPLIFIED = 'zh-Hans';
+export const CZECH_CZECHIA = 'cs-CZ';
 export const PSEUDO_LOCALE = 'pseudo-LOCALE';
 
 export const DEFAULT_LOCALE = ENGLISH_US;
@@ -49,6 +50,12 @@ export const LOCALES: LocaleDefinition[] = [
     code: CHINESE_SIMPLIFIED,
     name: '中文（简体）',
     loader: () => import('../../../locales/zh-Hans/grafana.json'),
+  },
+
+  {
+    code: CZECH_CZECHIA,
+    name: 'Čeština',
+    loader: () => import('../../../locales/cs-CZ/grafana.json'),
   },
 ];
 

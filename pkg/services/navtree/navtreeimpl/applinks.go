@@ -141,6 +141,7 @@ func (s *ServiceImpl) processAppPlugin(plugin plugins.PluginDTO, c *models.ReqCo
 					Url:      path.Join(s.cfg.AppSubURL, dboardURL),
 					Text:     include.Name,
 					PluginID: plugin.ID,
+					Id:       include.UID,
 				}
 				appLink.Children = append(appLink.Children, link)
 			}
