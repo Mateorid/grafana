@@ -9,6 +9,24 @@ import { t } from 'app/core/internationalization';
 export function getNavTitle(navId: string | undefined) {
   // the switch cases must match the ID of the navigation item, as defined in the backend nav model
   switch (navId) {
+    case 'plugin-page-skodadigitalsro-premisnavbar-app':
+      return t('skoda-plugin.dashboards', 'Dashboards');
+    case 'main':
+      return t('skoda-plugin.main', 'Main');
+    case 'fleet':
+      return t('skoda-plugin.fleet', 'Fleet');
+    case 'vehicle':
+      return t('skoda-plugin.vehicle', 'Vehicle');
+    case 'en_cons':
+      return t('skoda-plugin.energy-consumption', 'Energy consumption');
+    case 'boogie_diag':
+      return t('skoda-plugin.boogie-diag', 'Boogie diagnostic');
+    case 'vehicle-unit':
+      return t('skoda-plugin.vehicle-unit', 'Vehicle unit');
+    case 'alerts':
+      return t('skoda-plugin.alerts', 'Alerts');
+    case 'signals':
+      return t('skoda-plugin.signals', 'Signals');
     case 'home':
       return t('nav.home.title', 'Home');
     case 'new':

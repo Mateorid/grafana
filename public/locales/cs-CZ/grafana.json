@@ -2,18 +2,29 @@
   "_comment": "Do not manually edit this file, or update these source phrases in Crowdin. The source of truth for English strings are in the code source",
   "clipboard-button": {
     "inline-toast": {
-      "success": "Copied"
+      "success": "Zkopírováno"
     }
+  },
+  "skoda-plugin": {
+    "dashboards": "Škoda-PREMIS",
+    "main": "Domů",
+    "fleet": "Flotila",
+    "vehicle": "Vozidlo",
+    "vehicle-unit": "Člen",
+    "alerts": "Hlášení",
+    "signals": "Signály",
+    "boogie-diag": "Boogie diagnostika",
+    "energy-consumption": "Spotřeba energie"
   },
   "command-palette": {
     "action": {
-      "dark-theme": "Dark",
-      "change-theme": "Change theme...",
-      "light-theme": "Light",
-      "search": "Search"
+      "dark-theme": "Tmavý",
+      "change-theme": "Změnit motic",
+      "light-theme": "Světlý",
+      "search": "Vyhledávat"
     },
     "search-box": {
-      "placeholder": "Search or jump to..."
+      "placeholder": "Search Grafana"
     },
     "section": {
       "actions": "Actions",
@@ -25,27 +36,27 @@
   },
   "common": {
     "locale": {
-      "default": "Default"
+      "default": "Výchozí"
     },
-    "save": "Save"
+    "save": "Uložit"
   },
   "dashboard": {
     "inspect": {
-      "actions-tab": "Actions",
+      "actions-tab": "Akce",
       "data-tab": "Data",
       "error-tab": "Error",
       "json-tab": "JSON",
       "meta-tab": "Meta Data",
       "query-tab": "Query",
-      "stats-tab": "Stats",
-      "subtitle": "{{queryCount}} queries with total query time of {{formatted}}",
-      "title": "Inspect: {{panelTitle}}"
+      "stats-tab": "Statistiky",
+      "subtitle": "{{queryCount}} queries s celkovým časem {{formatted}}",
+      "title": "Inspektovat: {{panelTitle}}"
     },
     "inspect-data": {
-      "data-options": "Data options",
-      "dataframe-aria-label": "Select dataframe",
-      "dataframe-label": "Show data frame",
-      "download-csv": "Download CSV",
+      "data-options": "Data možnosti",
+      "dataframe-aria-label": "Vybrat časový úsek",
+      "dataframe-label": "Zobazit časový úsek",
+      "download-csv": "Stáhnout CSV",
       "download-excel-description": "Adds header to CSV for use with Excel",
       "download-excel-label": "Download for Excel",
       "download-logs": "Download logs",
@@ -83,7 +94,7 @@
       "table-title": "Stats"
     },
     "toolbar": {
-      "add-panel": "Add panel",
+      "add-panel": "Přidat panel",
       "comments-show": "Show dashboard comments",
       "mark-favorite": "Mark as favorite",
       "open-original": "Open original dashboard",
@@ -160,7 +171,7 @@
       "title": "Alert rules"
     },
     "alerting-receivers": {
-      "subtitle": "Choose how to notify your contact points when an alert instance fires",
+      "subtitle": "Choose how to notify your  contact points when an alert instance fires",
       "title": "Contact points"
     },
     "alerting-silences": {
@@ -191,7 +202,7 @@
       "title": "Create"
     },
     "create-alert": {
-      "title": "New alert rule"
+      "title": "Create alert rule"
     },
     "create-dashboard": {
       "title": "Dashboard"
@@ -287,9 +298,6 @@
       "title": "Profile"
     },
     "profile/switch-org": "Switch organization",
-    "public": {
-      "title": "Public dashboards"
-    },
     "scenes": {
       "title": "Scenes"
     },
@@ -378,7 +386,7 @@
   "refresh-picker": {
     "aria-label": {
       "duration-selected": "Choose refresh time interval with current interval {{durationAriaLabel}} selected",
-      "choose-interval": "Auto refresh turned off. Choose refresh time interval"
+      "choose-interval": "Automatická aktualiza vypnuta. Vyberte interval aktualizace"
     },
     "live-option": {
       "aria-label": "Turn on live streaming",
@@ -402,7 +410,7 @@
   },
   "share-modal": {
     "dashboard": {
-      "title": "Share"
+      "title": "Sdílet"
     },
     "embed": {
       "copy": "Copy to clipboard",
@@ -440,15 +448,15 @@
       "title": "Share Panel"
     },
     "snapshot": {
-      "cancel-button": "Cancel",
-      "copy-link-button": "Copy",
-      "delete-button": "Delete snapshot.",
-      "deleted-message": "The snapshot has been deleted. If you have already accessed it once, then it might take up to an hour before before it is removed from browser caches or CDN caches.",
+      "cancel-button": "Zruši",
+      "copy-link-button": "Kopírovat",
+      "delete-button": "Odstranit snapshot.",
+      "deleted-message": "Snapshot byl smazán. -todo If you have already accessed it once, then it might take up to an hour before before it is removed from browser caches or CDN caches.",
       "expire": "Expire",
-      "expire-day": "1 Day",
-      "expire-hour": "1 Hour",
-      "expire-never": "Never",
-      "expire-week": "7 Days",
+      "expire-day": "1 Den",
+      "expire-hour": "1 Hodina",
+      "expire-never": "Nikdy",
+      "expire-week": "7 Dnů",
       "info-text-1": "A snapshot is an instant way to share an interactive dashboard publicly. When created, we strip sensitive data like queries (metric, template, and annotation) and panel links, leaving only the visible metric data and series names embedded in your dashboard.",
       "info-text-2": "Keep in mind, your snapshot <1>can be viewed by anyone</1> that has the link and can access the URL. Share wisely.",
       "local-button": "Local Snapshot",
@@ -466,10 +474,10 @@
       "snapshot": "Snapshot"
     },
     "theme-picker": {
-      "current": "Current",
-      "dark": "Dark",
-      "field-name": "Theme",
-      "light": "Light"
+      "current": "Aktuální",
+      "dark": "Tmavý",
+      "field-name": "Motiv",
+      "light": "Světlý"
     },
     "view-json": {
       "copy-button": "Copy to Clipboard"
@@ -477,23 +485,23 @@
   },
   "shared-dashboard": {
     "fields": {
-      "timezone-label": "Timezone"
+      "timezone-label": "Časová zóna"
     }
   },
   "shared-preferences": {
     "fields": {
       "home-dashboard-label": "Home Dashboard",
       "home-dashboard-placeholder": "Default dashboard",
-      "locale-label": "Language",
-      "locale-placeholder": "Choose language",
-      "theme-label": "UI Theme",
-      "week-start-label": "Week start"
+      "locale-label": "Jazyk",
+      "locale-placeholder": "Vyberte jazyk",
+      "theme-label": "Motiv UI",
+      "week-start-label": "Začátek týdne"
     },
     "theme": {
-      "dark-label": "Dark",
-      "default-label": "Default",
-      "light-label": "Light",
-      "system-label": "System"
+      "dark-label": "Tmavý",
+      "default-label": "Výchozí",
+      "light-label": "Světlý",
+      "system-label": "Systémový"
     },
     "title": "Preferences"
   },

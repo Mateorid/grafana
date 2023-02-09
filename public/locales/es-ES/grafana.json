@@ -7,8 +7,8 @@
   },
   "command-palette": {
     "action": {
-      "change-theme": "",
       "dark-theme": "",
+      "change-theme": "",
       "light-theme": "",
       "search": ""
     },
@@ -142,15 +142,15 @@
       "subtitle": "Determinar cómo se enrutan las alertas a los puntos de contacto",
       "title": "Políticas de notificación"
     },
-    "alerting-channels": {
-      "title": "Canales de notificación"
-    },
     "alerting-groups": {
       "subtitle": "Ver alertas agrupadas de una instancia de Alertmanager",
       "title": "Grupos"
     },
     "alerting-home": {
       "title": "Inicio"
+    },
+    "alerting-channels": {
+      "title": "Canales de notificación"
     },
     "alerting-legacy": {
       "title": "Alertas (heredado)"
@@ -377,8 +377,8 @@
   },
   "refresh-picker": {
     "aria-label": {
-      "choose-interval": "Actualización automática desactivada. Elija un intervalo de tiempo de actualización",
-      "duration-selected": "Elegir intervalo de tiempo de actualización con el intervalo actual {{durationAriaLabel}} seleccionado"
+      "duration-selected": "Elegir intervalo de tiempo de actualización con el intervalo actual {{durationAriaLabel}} seleccionado",
+      "choose-interval": "Actualización automática desactivada. Elija un intervalo de tiempo de actualización"
     },
     "live-option": {
       "aria-label": "Activar transmisión en directo",
@@ -512,9 +512,9 @@
       "filter-placeholder": "Buscar intervalos rápidos"
     },
     "footer": {
-      "change-settings-button": "Cambiar ajustes de tiempo",
       "fiscal-year-option": "Ejercicio fiscal",
       "fiscal-year-start": "Mes de inicio del ejercicio fiscal",
+      "change-settings-button": "Cambiar ajustes de tiempo",
       "time-zone-option": "Huso horario",
       "time-zone-selection": "Selección del huso horario"
     },

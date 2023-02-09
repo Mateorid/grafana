@@ -7,8 +7,8 @@
   },
   "command-palette": {
     "action": {
-      "change-theme": "",
       "dark-theme": "",
+      "change-theme": "",
       "light-theme": "",
       "search": ""
     },
@@ -142,15 +142,15 @@
       "subtitle": "确定警报如何路由到联络点",
       "title": "通知策略"
     },
-    "alerting-channels": {
-      "title": "通知渠道"
-    },
     "alerting-groups": {
       "subtitle": "查看来自 Alertmanager（警报管理器）实例的分组警报",
       "title": "组"
     },
     "alerting-home": {
       "title": ""
+    },
+    "alerting-channels": {
+      "title": "通知渠道"
     },
     "alerting-legacy": {
       "title": "警报（遗留）"
@@ -377,8 +377,8 @@
   },
   "refresh-picker": {
     "aria-label": {
-      "choose-interval": "自动刷新已关闭。选择刷新时间间隔",
-      "duration-selected": ""
+      "duration-selected": "",
+      "choose-interval": "自动刷新已关闭。选择刷新时间间隔"
     },
     "live-option": {
       "aria-label": "",
@@ -512,9 +512,9 @@
       "filter-placeholder": ""
     },
     "footer": {
-      "change-settings-button": "",
       "fiscal-year-option": "",
       "fiscal-year-start": "",
+      "change-settings-button": "",
       "time-zone-option": "",
       "time-zone-selection": ""
     },

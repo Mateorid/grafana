@@ -90,6 +90,10 @@ ENV PATH="/usr/share/grafana/bin:$PATH" \
 
 WORKDIR $GF_PATHS_HOME
 
+#ADDED: certificates
+COPY ./ssl/GITH_CERT.crt /usr/local/share/ca-certificates/CERTGH.crt
+RUN cat /usr/local/share/ca-certificates/CERTGH.crt >> /etc/ssl/certs/ca-certificates.crt
+
 # Install dependencies
 RUN if grep -i -q alpine /etc/issue; then \
       apk add --no-cache ca-certificates bash tzdata musl-utils && \

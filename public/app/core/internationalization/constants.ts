@@ -1,6 +1,7 @@
 import { ResourceKey } from 'i18next';
 
 export const ENGLISH_US = 'en-US';
+export const CZECH_CZECHIA = 'cs-CZ';
 export const FRENCH_FRANCE = 'fr-FR';
 export const SPANISH_SPAIN = 'es-ES';
 export const GERMAN_GERMANY = 'de-DE';
@@ -49,6 +50,12 @@ export const LANGUAGES: LanguageDefinitions[] = [
     code: CHINESE_SIMPLIFIED,
     name: '中文（简体）',
     loader: () => import('../../../locales/zh-Hans/grafana.json'),
+  },
+
+  {
+    code: CZECH_CZECHIA,
+    name: 'Čeština',
+    loader: () => import('../../../locales/cs-CZ/grafana.json'),
   },
 ];
 
