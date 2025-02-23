@@ -2,17 +2,19 @@ package service
 
 import (
 	"context"
+	"strconv"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/gtime"
 	"github.com/grafana/grafana/pkg/api/dtos"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/components/simplejson"
-	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	"github.com/grafana/grafana/pkg/expr"
 	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/services/dashboards"
-	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/publicdashboards/models"
 	"github.com/grafana/grafana/pkg/services/publicdashboards/validation"
-	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/tsdb/grafanads"
 )
 
@@ -32,8 +34,8 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 		return nil, models.ErrInternalServerError.Errorf("FindAnnotations: failed to unmarshal dashboard annotations: %w", err)
 	}
 
-	anonymousUser := buildAnonymousUser(ctx, dash)
-
+	// We don't have a signed in user for public dashboards. We are using Grafana's Identity to query the annotations.
+	svcCtx, svcIdent := identity.WithServiceIdentity(ctx, dash.OrgID)
 	uniqueEvents := make(map[int64]models.AnnotationEvent, 0)
 	for _, anno := range annoDto.Annotations.List {
 		// skip annotations that are not enabled or are not a grafana datasource
@@ -46,17 +48,19 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 			OrgID:        dash.OrgID,
 			DashboardID:  dash.ID,
 			DashboardUID: dash.UID,
-			Limit:        anno.Target.Limit,
-			MatchAny:     anno.Target.MatchAny,
-			SignedInUser: anonymousUser,
+			SignedInUser: svcIdent,
 		}
 
-		if anno.Target.Type == "tags" {
-			annoQuery.DashboardID = 0
-			annoQuery.Tags = anno.Target.Tags
+		if anno.Target != nil {
+			annoQuery.Limit = anno.Target.Limit
+			annoQuery.MatchAny = anno.Target.MatchAny
+			if anno.Target.Type == "tags" {
+				annoQuery.DashboardID = 0
+				annoQuery.Tags = anno.Target.Tags
+			}
 		}
 
-		annotationItems, err := pd.AnnotationsRepo.Find(ctx, annoQuery)
+		annotationItems, err := pd.AnnotationsRepo.Find(svcCtx, annoQuery)
 		if err != nil {
 			return nil, models.ErrInternalServerError.Errorf("FindAnnotations: failed to find annotations: %w", err)
 		}
@@ -68,7 +72,7 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 				Tags:        item.Tags,
 				IsRegion:    item.TimeEnd > 0 && item.Time != item.TimeEnd,
 				Text:        item.Text,
-				Color:       *anno.IconColor,
+				Color:       anno.IconColor,
 				Time:        item.Time,
 				TimeEnd:     item.TimeEnd,
 				Source:      anno,
@@ -76,13 +80,13 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 
 			// We want dashboard annotations to reference the panel they're for. If no panelId is provided, they'll show up on all panels
 			// which is only intended for tag and org annotations.
-			if anno.Type == "dashboard" {
+			if anno.Type != nil && *anno.Type == "dashboard" {
 				event.PanelId = item.PanelID
 			}
 
 			// We want events from tag queries to overwrite existing events
 			_, has := uniqueEvents[event.Id]
-			if !has || (has && anno.Target.Type == "tags") {
+			if !has || (has && anno.Target != nil && anno.Target.Type == "tags") {
 				uniqueEvents[event.Id] = event
 			}
 		}
@@ -104,7 +108,6 @@ func (pd *PublicDashboardServiceImpl) GetMetricRequest(ctx context.Context, dash
 	}
 
 	metricReqDTO, err := pd.buildMetricRequest(
-		ctx,
 		dashboard,
 		publicDashboard,
 		panelId,
@@ -118,7 +121,7 @@ func (pd *PublicDashboardServiceImpl) GetMetricRequest(ctx context.Context, dash
 }
 
 // GetQueryDataResponse returns a query data response for the given panel and query
-func (pd *PublicDashboardServiceImpl) GetQueryDataResponse(ctx context.Context, skipCache bool, queryDto models.PublicDashboardQueryDTO, panelId int64, accessToken string) (*backend.QueryDataResponse, error) {
+func (pd *PublicDashboardServiceImpl) GetQueryDataResponse(ctx context.Context, skipDSCache bool, queryDto models.PublicDashboardQueryDTO, panelId int64, accessToken string) (*backend.QueryDataResponse, error) {
 	publicDashboard, dashboard, err := pd.FindEnabledPublicDashboardAndDashboardByAccessToken(ctx, accessToken)
 	if err != nil {
 		return nil, err
@@ -133,8 +136,9 @@ func (pd *PublicDashboardServiceImpl) GetQueryDataResponse(ctx context.Context, 
 		return nil, models.ErrPanelQueriesNotFound.Errorf("GetQueryDataResponse: failed to extract queries from panel")
 	}
 
-	anonymousUser := buildAnonymousUser(ctx, dashboard)
-	res, err := pd.QueryDataService.QueryData(ctx, anonymousUser, skipCache, metricReq)
+	// We don't have a signed in user for public dashboards. We are using Grafana's Identity to query the datasource.
+	svcCtx, svcIdent := identity.WithServiceIdentity(ctx, dashboard.OrgID)
+	res, err := pd.QueryDataService.QueryData(svcCtx, svcIdent, skipDSCache, metricReq)
 
 	reqDatasources := metricReq.GetUniqueDatasourceTypes()
 	if err != nil {
@@ -149,15 +153,15 @@ func (pd *PublicDashboardServiceImpl) GetQueryDataResponse(ctx context.Context, 
 }
 
 // buildMetricRequest merges public dashboard parameters with dashboard and returns a metrics request to be sent to query backend
-func (pd *PublicDashboardServiceImpl) buildMetricRequest(ctx context.Context, dashboard *dashboards.Dashboard, publicDashboard *models.PublicDashboard, panelId int64, reqDTO models.PublicDashboardQueryDTO) (dtos.MetricRequest, error) {
+func (pd *PublicDashboardServiceImpl) buildMetricRequest(dashboard *dashboards.Dashboard, publicDashboard *models.PublicDashboard, panelID int64, reqDTO models.PublicDashboardQueryDTO) (dtos.MetricRequest, error) {
 	// group queries by panel
 	queriesByPanel := groupQueriesByPanelId(dashboard.Data)
-	queries, ok := queriesByPanel[panelId]
+	queries, ok := queriesByPanel[panelID]
 	if !ok {
 		return dtos.MetricRequest{}, models.ErrPanelNotFound.Errorf("buildMetricRequest: public dashboard panel not found")
 	}
 
-	ts := publicDashboard.BuildTimeSettings(dashboard, reqDTO)
+	ts := buildTimeSettings(dashboard, reqDTO, publicDashboard, panelID)
 
 	// determine safe resolution to query data at
 	safeInterval, safeResolution := pd.getSafeIntervalAndMaxDataPoints(reqDTO, ts)
@@ -174,68 +178,6 @@ func (pd *PublicDashboardServiceImpl) buildMetricRequest(ctx context.Context, da
 	}, nil
 }
 
-// buildAnonymousUser creates a user with permissions to read from all datasources used in the dashboard
-func buildAnonymousUser(ctx context.Context, dashboard *dashboards.Dashboard) *user.SignedInUser {
-	datasourceUids := getUniqueDashboardDatasourceUids(dashboard.Data)
-
-	// Create a user with blank permissions
-	anonymousUser := &user.SignedInUser{OrgID: dashboard.OrgID, Permissions: make(map[int64]map[string][]string)}
-
-	// Scopes needed for Annotation queries
-	annotationScopes := []string{accesscontrol.ScopeAnnotationsTypeDashboard}
-	// Need to access all dashboards since tags annotations span across all dashboards
-	dashboardScopes := []string{dashboards.ScopeDashboardsProvider.GetResourceAllScope()}
-
-	// Scopes needed for datasource queries
-	queryScopes := make([]string, 0)
-	readScopes := make([]string, 0)
-	for _, uid := range datasourceUids {
-		scope := datasources.ScopeProvider.GetResourceScopeUID(uid)
-		queryScopes = append(queryScopes, scope)
-		readScopes = append(readScopes, scope)
-	}
-
-	// Apply all scopes to the actions we need the user to be able to perform
-	permissions := make(map[string][]string)
-	permissions[datasources.ActionQuery] = queryScopes
-	permissions[datasources.ActionRead] = readScopes
-	permissions[accesscontrol.ActionAnnotationsRead] = annotationScopes
-	permissions[dashboards.ActionDashboardsRead] = dashboardScopes
-
-	anonymousUser.Permissions[dashboard.OrgID] = permissions
-
-	return anonymousUser
-}
-
-func getUniqueDashboardDatasourceUids(dashboard *simplejson.Json) []string {
-	var datasourceUids []string
-	exists := map[string]bool{}
-
-	for _, panelObj := range dashboard.Get("panels").MustArray() {
-		panel := simplejson.NewFromAny(panelObj)
-		uid := getDataSourceUidFromJson(panel)
-
-		// if uid is for a mixed datasource, get the datasource uids from the targets
-		if uid == "-- Mixed --" {
-			for _, target := range panel.Get("targets").MustArray() {
-				target := simplejson.NewFromAny(target)
-				datasourceUid := target.Get("datasource").Get("uid").MustString()
-				if _, ok := exists[datasourceUid]; !ok {
-					datasourceUids = append(datasourceUids, datasourceUid)
-					exists[datasourceUid] = true
-				}
-			}
-		} else {
-			if _, ok := exists[uid]; !ok {
-				datasourceUids = append(datasourceUids, uid)
-				exists[uid] = true
-			}
-		}
-	}
-
-	return datasourceUids
-}
-
 func groupQueriesByPanelId(dashboard *simplejson.Json) map[int64][]*simplejson.Json {
 	result := make(map[int64][]*simplejson.Json)
 
@@ -244,7 +186,7 @@ func groupQueriesByPanelId(dashboard *simplejson.Json) map[int64][]*simplejson.J
 	return result
 }
 
-func extractQueriesFromPanels(panels []interface{}, result map[int64][]*simplejson.Json) {
+func extractQueriesFromPanels(panels []any, result map[int64][]*simplejson.Json) {
 	for _, panelObj := range panels {
 		panel := simplejson.NewFromAny(panelObj)
 
@@ -256,17 +198,25 @@ func extractQueriesFromPanels(panels []interface{}, result map[int64][]*simplejs
 		}
 
 		var panelQueries []*simplejson.Json
+		hasExpression := panelHasAnExpression(panel)
 
 		for _, queryObj := range panel.Get("targets").MustArray() {
 			query := simplejson.NewFromAny(queryObj)
 
-			// We dont support exemplars for public dashboards currently
+			// it the panel doesn't have an expression and the query is disabled (hide is true), skip the query
+			// the expression handler will take care later of removing hidden queries which could be necessary to calculate
+			// the value of other queries
+			if !hasExpression && query.Get("hide").MustBool() {
+				continue
+			}
+
+			// We don't support exemplars for public dashboards currently
 			query.Del("exemplar")
 
 			// if query target has no datasource, set it to have the datasource on the panel
 			if _, ok := query.CheckGet("datasource"); !ok {
 				uid := getDataSourceUidFromJson(panel)
-				datasource := map[string]interface{}{"type": "public-ds", "uid": uid}
+				datasource := map[string]any{"type": "public-ds", "uid": uid}
 				query.Set("datasource", datasource)
 			}
 			panelQueries = append(panelQueries, query)
@@ -274,6 +224,17 @@ func extractQueriesFromPanels(panels []interface{}, result map[int64][]*simplejs
 
 		result[panel.Get("id").MustInt64()] = panelQueries
 	}
+}
+
+func panelHasAnExpression(panel *simplejson.Json) bool {
+	var hasExpression bool
+	for _, queryObj := range panel.Get("targets").MustArray() {
+		query := simplejson.NewFromAny(queryObj)
+		if expr.NodeTypeFromDatasourceUID(getDataSourceUidFromJson(query)) == expr.TypeCMDNode {
+			hasExpression = true
+		}
+	}
+	return hasExpression
 }
 
 func getDataSourceUidFromJson(query *simplejson.Json) string {
@@ -293,8 +254,99 @@ func sanitizeMetadataFromQueryData(res *backend.QueryDataResponse) {
 		for i := range frames {
 			if frames[i].Meta != nil {
 				frames[i].Meta.ExecutedQueryString = ""
-				frames[i].Meta.Custom = nil
 			}
 		}
 	}
+}
+
+// sanitizeData removes the query expressions from the dashboard data
+func sanitizeData(data *simplejson.Json) {
+	for _, panelObj := range data.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelObj)
+
+		// if the panel is a row and it is collapsed, get the queries from the panels inside the row
+		if panel.Get("type").MustString() == "row" && panel.Get("collapsed").MustBool() {
+			// recursive call to get queries from panels inside a row
+			sanitizeData(panel)
+			continue
+		}
+
+		for _, targetObj := range panel.Get("targets").MustArray() {
+			target := simplejson.NewFromAny(targetObj)
+			target.Del("expr")
+			target.Del("query")
+			target.Del("rawSql")
+		}
+	}
+}
+
+// NewTimeRange declared to be able to stub this function in tests
+var NewTimeRange = gtime.NewTimeRange
+
+// BuildTimeSettings build time settings object using selected values if enabled and are valid or dashboard default values
+func buildTimeSettings(d *dashboards.Dashboard, reqDTO models.PublicDashboardQueryDTO, pd *models.PublicDashboard, panelID int64) models.TimeSettings {
+	from, to, timezone := getTimeRangeValuesOrDefault(reqDTO, d, pd.TimeSelectionEnabled, panelID)
+
+	timeRange := NewTimeRange(from, to)
+
+	timeFrom, _ := timeRange.ParseFrom(
+		gtime.WithLocation(timezone),
+	)
+	timeTo, _ := timeRange.ParseTo(
+		gtime.WithLocation(timezone),
+	)
+	timeToAsEpoch := timeTo.UnixMilli()
+	timeFromAsEpoch := timeFrom.UnixMilli()
+
+	// Were using epoch ms because this is used to build a MetricRequest, which is used by query caching, which want the time range in epoch milliseconds.
+	return models.TimeSettings{
+		From: strconv.FormatInt(timeFromAsEpoch, 10),
+		To:   strconv.FormatInt(timeToAsEpoch, 10),
+	}
+}
+
+// returns from, to and timezone from the request if the timeSelection is enabled or the dashboard default values
+func getTimeRangeValuesOrDefault(reqDTO models.PublicDashboardQueryDTO, d *dashboards.Dashboard, timeSelectionEnabled bool, panelID int64) (string, string, *time.Location) {
+	from := d.Data.GetPath("time", "from").MustString()
+	to := d.Data.GetPath("time", "to").MustString()
+	dashboardTimezone := d.Data.GetPath("timezone").MustString()
+
+	panelRelativeTime := getPanelRelativeTimeRange(d.Data, panelID)
+	if panelRelativeTime != "" {
+		from = panelRelativeTime
+	}
+
+	// we use the values from the request if the time selection is enabled and the values are valid
+	if timeSelectionEnabled {
+		if reqDTO.TimeRange.From != "" && reqDTO.TimeRange.To != "" {
+			from = reqDTO.TimeRange.From
+			to = reqDTO.TimeRange.To
+		}
+
+		if reqDTO.TimeRange.Timezone != "" {
+			if userTimezone, err := time.LoadLocation(reqDTO.TimeRange.Timezone); err == nil {
+				return from, to, userTimezone
+			}
+		}
+	}
+
+	// if the dashboardTimezone is blank or there is an error default is UTC
+	timezone, err := time.LoadLocation(dashboardTimezone)
+	if err != nil {
+		return from, to, time.UTC
+	}
+
+	return from, to, timezone
+}
+
+func getPanelRelativeTimeRange(dashboard *simplejson.Json, panelID int64) string {
+	for _, panelObj := range dashboard.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelObj)
+
+		if panel.Get("id").MustInt64() == panelID {
+			return panel.Get("timeFrom").MustString()
+		}
+	}
+
+	return ""
 }

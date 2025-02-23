@@ -1,4 +1,5 @@
-import { ExplorePanelsState } from './explore';
+import { ScopedVars } from './ScopedVars';
+import { ExploreCorrelationHelperData, ExplorePanelsState } from './explore';
 import { InterpolateFunction } from './panel';
 import { DataQuery } from './query';
 import { TimeRange } from './time';
@@ -19,6 +20,7 @@ export interface DataLinkClickEvent<T = any> {
 export enum DataLinkConfigOrigin {
   Datasource = 'Datasource',
   Correlations = 'Correlations',
+  ExploreCorrelationsEditor = 'CorrelationsEditor',
 }
 
 /**
@@ -50,17 +52,28 @@ export interface DataLink<T extends DataQuery = any> {
   internal?: InternalDataLink<T>;
 
   origin?: DataLinkConfigOrigin;
+  meta?: {
+    correlationData?: ExploreCorrelationHelperData;
+    transformations?: DataLinkTransformationConfig[];
+  };
+
+  oneClick?: boolean;
 }
 
-/** @internal */
-export enum SupportedTransformationTypes {
+/**
+ * We provide tooltips with information about these to guide the user, please
+ * check for validity when adding more transformation types.
+ *
+ * @internal
+ */
+export enum SupportedTransformationType {
   Regex = 'regex',
   Logfmt = 'logfmt',
 }
 
 /** @internal */
 export interface DataLinkTransformationConfig {
-  type: SupportedTransformationTypes;
+  type: SupportedTransformationType;
   field?: string;
   expression?: string;
   mapValue?: string;
@@ -68,11 +81,10 @@ export interface DataLinkTransformationConfig {
 
 /** @internal */
 export interface InternalDataLink<T extends DataQuery = any> {
-  query: T;
+  query: T | ((options: { replaceVariables: InterpolateFunction; scopedVars: ScopedVars }) => T);
   datasourceUid: string;
   datasourceName: string; // used as a title if `DataLink.title` is empty
   panelsState?: ExplorePanelsState;
-  transformations?: DataLinkTransformationConfig[];
   range?: TimeRange;
 }
 
@@ -89,6 +101,7 @@ export interface LinkModel<T = any> {
 
   // When a click callback exists, this is passed the raw mouse|react event
   onClick?: (e: any, origin?: any) => void;
+  oneClick?: boolean;
 }
 
 /**
@@ -118,4 +131,10 @@ export interface VariableSuggestion {
 
 export enum VariableSuggestionsScope {
   Values = 'values',
+}
+
+export enum OneClickMode {
+  Action = 'action',
+  Link = 'link',
+  Off = 'off',
 }

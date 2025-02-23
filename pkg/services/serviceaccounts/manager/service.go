@@ -4,20 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
-	"github.com/grafana/grafana/pkg/api/routing"
+	claims "github.com/grafana/authlib/types"
+
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/kvstore"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/infra/serverlock"
 	"github.com/grafana/grafana/pkg/infra/usagestats"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apikey"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/serviceaccounts"
-	"github.com/grafana/grafana/pkg/services/serviceaccounts/api"
 	"github.com/grafana/grafana/pkg/services/serviceaccounts/database"
 	"github.com/grafana/grafana/pkg/services/serviceaccounts/secretscan"
-	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -28,10 +31,17 @@ const (
 )
 
 type ServiceAccountsService struct {
+	acService   accesscontrol.Service
+	permissions accesscontrol.ServiceAccountPermissionsService
+
+	cfg               *setting.Cfg
+	db                db.DB
 	store             store
 	log               log.Logger
 	backgroundLog     log.Logger
 	secretScanService secretscan.Checker
+	orgService        org.Service
+	serverLock        *serverlock.ServerLockService
 
 	secretScanEnabled  bool
 	secretScanInterval time.Duration
@@ -39,16 +49,15 @@ type ServiceAccountsService struct {
 
 func ProvideServiceAccountsService(
 	cfg *setting.Cfg,
-	ac accesscontrol.AccessControl,
-	routeRegister routing.RouteRegister,
 	usageStats usagestats.Service,
-	store *sqlstore.SQLStore,
+	store db.DB,
 	apiKeyService apikey.Service,
 	kvStore kvstore.KVStore,
 	userService user.Service,
 	orgService org.Service,
-	permissionService accesscontrol.ServiceAccountPermissionsService,
-	accesscontrolService accesscontrol.Service,
+	acService accesscontrol.Service,
+	permissions accesscontrol.ServiceAccountPermissionsService,
+	serverLockService *serverlock.ServerLockService,
 ) (*ServiceAccountsService, error) {
 	serviceAccountsStore := database.ProvideServiceAccountsStore(
 		cfg,
@@ -58,21 +67,23 @@ func ProvideServiceAccountsService(
 		userService,
 		orgService,
 	)
-	log := log.New("serviceaccounts")
 	s := &ServiceAccountsService{
+		cfg:           cfg,
+		db:            store,
+		acService:     acService,
+		permissions:   permissions,
 		store:         serviceAccountsStore,
-		log:           log,
+		log:           log.New("serviceaccounts"),
 		backgroundLog: log.New("serviceaccounts.background"),
+		orgService:    orgService,
+		serverLock:    serverLockService,
 	}
 
-	if err := RegisterRoles(accesscontrolService); err != nil {
+	if err := RegisterRoles(acService); err != nil {
 		s.log.Error("Failed to register roles", "error", err)
 	}
 
 	usageStats.RegisterMetricsFunc(s.getUsageMetrics)
-
-	serviceaccountsAPI := api.NewServiceAccountsAPI(cfg, s, ac, accesscontrolService, routeRegister, permissionService)
-	serviceaccountsAPI.RegisterAPIEndpoints()
 
 	s.secretScanEnabled = cfg.SectionWithEnvOverrides("secretscan").Key("enabled").MustBool(false)
 	s.secretScanInterval = cfg.SectionWithEnvOverrides("secretscan").
@@ -82,7 +93,7 @@ func ProvideServiceAccountsService(
 		s.secretScanService, errSecret = secretscan.NewService(s.store, cfg)
 		if errSecret != nil {
 			s.secretScanEnabled = false
-			s.log.Warn("failed to initialize secret scan service. secret scan is disabled",
+			s.log.Warn("Failed to initialize secret scan service. secret scan is disabled",
 				"error", errSecret.Error())
 		}
 	}
@@ -91,10 +102,21 @@ func ProvideServiceAccountsService(
 }
 
 func (sa *ServiceAccountsService) Run(ctx context.Context) error {
-	sa.backgroundLog.Debug("service initialized")
+	sa.backgroundLog.Debug("Service initialized")
 
 	if _, err := sa.getUsageMetrics(ctx); err != nil {
 		sa.log.Warn("Failed to get usage metrics", "error", err.Error())
+	}
+
+	err := sa.serverLock.LockAndExecute(ctx, "migrate API keys to service accounts", time.Minute*30, func(context.Context) {
+		err := sa.migrateAPIKeysForAllOrgs(ctx)
+		if err != nil {
+			sa.log.Warn("Failed to migrate API keys", "error", err.Error())
+		}
+	})
+
+	if err != nil {
+		sa.log.Error("Failed to lock and execute the migration of API keys to service accounts", "error", err)
 	}
 
 	updateStatsTicker := time.NewTicker(metricsCollectionInterval)
@@ -102,7 +124,7 @@ func (sa *ServiceAccountsService) Run(ctx context.Context) error {
 
 	// Enforce a minimum interval of 1 minute.
 	if sa.secretScanEnabled && sa.secretScanInterval < time.Minute {
-		sa.backgroundLog.Warn("secret scan interval is too low, increasing to " +
+		sa.backgroundLog.Warn("Secret scan interval is too low, increasing to " +
 			defaultSecretScanInterval.String())
 
 		sa.secretScanInterval = defaultSecretScanInterval
@@ -113,7 +135,7 @@ func (sa *ServiceAccountsService) Run(ctx context.Context) error {
 	if !sa.secretScanEnabled {
 		tokenCheckTicker.Stop()
 	} else {
-		sa.backgroundLog.Debug("enabled token secret check and executing first check")
+		sa.backgroundLog.Debug("Enabled token secret check and executing first check")
 		if err := sa.secretScanService.CheckTokens(ctx); err != nil {
 			sa.backgroundLog.Warn("Failed to check for leaked tokens", "error", err.Error())
 		}
@@ -128,17 +150,17 @@ func (sa *ServiceAccountsService) Run(ctx context.Context) error {
 				return fmt.Errorf("context error in service account background service: %w", ctx.Err())
 			}
 
-			sa.backgroundLog.Debug("stopped service account background service")
+			sa.backgroundLog.Debug("Stopped service account background service")
 
 			return nil
 		case <-updateStatsTicker.C:
-			sa.backgroundLog.Debug("updating usage metrics")
+			sa.backgroundLog.Debug("Updating usage metrics")
 
 			if _, err := sa.getUsageMetrics(ctx); err != nil {
 				sa.backgroundLog.Warn("Failed to get usage metrics", "error", err.Error())
 			}
 		case <-tokenCheckTicker.C:
-			sa.backgroundLog.Debug("checking for leaked tokens")
+			sa.backgroundLog.Debug("Checking for leaked tokens")
 
 			if err := sa.secretScanService.CheckTokens(ctx); err != nil {
 				sa.backgroundLog.Warn("Failed to check for leaked tokens", "error", err.Error())
@@ -147,21 +169,57 @@ func (sa *ServiceAccountsService) Run(ctx context.Context) error {
 	}
 }
 
+var _ serviceaccounts.Service = (*ServiceAccountsService)(nil)
+
 func (sa *ServiceAccountsService) CreateServiceAccount(ctx context.Context, orgID int64, saForm *serviceaccounts.CreateServiceAccountForm) (*serviceaccounts.ServiceAccountDTO, error) {
 	if err := validOrgID(orgID); err != nil {
 		return nil, err
 	}
-	return sa.store.CreateServiceAccount(ctx, orgID, saForm)
+
+	var serviceAccount *serviceaccounts.ServiceAccountDTO
+	err := sa.db.InTransaction(ctx, func(ctx context.Context) error {
+		var err error
+		serviceAccount, err = sa.store.CreateServiceAccount(ctx, orgID, saForm)
+		if err != nil {
+			return err
+		}
+
+		user, err := identity.GetRequester(ctx)
+		if err == nil && sa.cfg.RBAC.PermissionsOnCreation("service-account") {
+			if user.IsIdentityType(claims.TypeUser) {
+				userID, err := user.GetInternalID()
+				if err != nil {
+					return err
+				}
+
+				if _, err := sa.permissions.SetUserPermission(ctx,
+					orgID, accesscontrol.User{ID: userID},
+					strconv.FormatInt(serviceAccount.Id, 10), "Admin"); err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return serviceAccount, nil
 }
 
-func (sa *ServiceAccountsService) RetrieveServiceAccount(ctx context.Context, orgID int64, serviceAccountID int64) (*serviceaccounts.ServiceAccountProfileDTO, error) {
-	if err := validOrgID(orgID); err != nil {
+func (sa *ServiceAccountsService) RetrieveServiceAccount(ctx context.Context, query *serviceaccounts.GetServiceAccountQuery) (*serviceaccounts.ServiceAccountProfileDTO, error) {
+	if err := validOrgID(query.OrgID); err != nil {
 		return nil, err
 	}
-	if err := validServiceAccountID(serviceAccountID); err != nil {
-		return nil, err
+	if err := validServiceAccountID(query.ID); err != nil {
+		if err := validServiceAccountUID(query.UID); err != nil {
+			return nil, fmt.Errorf("invalid service account ID %d and UID %s has been specified", query.ID, query.UID)
+		}
 	}
-	return sa.store.RetrieveServiceAccount(ctx, orgID, serviceAccountID)
+	return sa.store.RetrieveServiceAccount(ctx, query)
 }
 
 func (sa *ServiceAccountsService) RetrieveServiceAccountIdByName(ctx context.Context, orgID int64, name string) (int64, error) {
@@ -181,7 +239,23 @@ func (sa *ServiceAccountsService) DeleteServiceAccount(ctx context.Context, orgI
 	if err := validServiceAccountID(serviceAccountID); err != nil {
 		return err
 	}
-	return sa.store.DeleteServiceAccount(ctx, orgID, serviceAccountID)
+	if err := sa.store.DeleteServiceAccount(ctx, orgID, serviceAccountID); err != nil {
+		return err
+	}
+	if err := sa.acService.DeleteUserPermissions(ctx, orgID, serviceAccountID); err != nil {
+		return err
+	}
+	return sa.permissions.DeleteResourcePermissions(ctx, orgID, fmt.Sprintf("%d", serviceAccountID))
+}
+
+func (sa *ServiceAccountsService) EnableServiceAccount(ctx context.Context, orgID, serviceAccountID int64, enable bool) error {
+	if err := validOrgID(orgID); err != nil {
+		return err
+	}
+	if err := validServiceAccountID(serviceAccountID); err != nil {
+		return err
+	}
+	return sa.store.EnableServiceAccount(ctx, orgID, serviceAccountID, enable)
 }
 
 func (sa *ServiceAccountsService) UpdateServiceAccount(ctx context.Context, orgID int64, serviceAccountID int64, saForm *serviceaccounts.UpdateServiceAccountForm) (*serviceaccounts.ServiceAccountProfileDTO, error) {
@@ -191,6 +265,7 @@ func (sa *ServiceAccountsService) UpdateServiceAccount(ctx context.Context, orgI
 	if err := validServiceAccountID(serviceAccountID); err != nil {
 		return nil, err
 	}
+
 	return sa.store.UpdateServiceAccount(ctx, orgID, serviceAccountID, saForm)
 }
 
@@ -235,11 +310,56 @@ func (sa *ServiceAccountsService) MigrateApiKey(ctx context.Context, orgID, keyI
 	}
 	return sa.store.MigrateApiKey(ctx, orgID, keyID)
 }
-func (sa *ServiceAccountsService) MigrateApiKeysToServiceAccounts(ctx context.Context, orgID int64) error {
+func (sa *ServiceAccountsService) MigrateApiKeysToServiceAccounts(ctx context.Context, orgID int64) (*serviceaccounts.MigrationResult, error) {
 	if err := validOrgID(orgID); err != nil {
-		return err
+		return nil, err
 	}
 	return sa.store.MigrateApiKeysToServiceAccounts(ctx, orgID)
+}
+
+func (sa *ServiceAccountsService) migrateAPIKeysForAllOrgs(ctx context.Context) error {
+	sa.log.Debug("Starting to migrate API keys to service accounts")
+
+	total := 0
+	migrated := 0
+	failed := 0
+	errorsTotal := 0
+
+	defer func() {
+		if total > 0 || errorsTotal > 0 {
+			sa.log.Info("API key migration finished", "total_keys", total, "successful_keys", migrated, "failed_keys", failed, "errors", errorsTotal)
+		}
+		setAPIKeyMigrationStats(total, migrated, failed)
+	}()
+
+	orgs, err := sa.orgService.Search(ctx, &org.SearchOrgsQuery{})
+	if err != nil {
+		return err
+	}
+
+	for _, o := range orgs {
+		sa.log.Debug("Migrating API keys for an org", "orgId", o.ID)
+
+		result, err := sa.store.MigrateApiKeysToServiceAccounts(ctx, o.ID)
+		if err != nil {
+			sa.log.Warn("Failed to migrate API keys", "error", err.Error(), "orgId", o.ID)
+			errorsTotal += 1
+			continue
+		}
+		if result.Failed > 0 {
+			sa.log.Warn("Some API keys failed to be migrated", "total_keys", result.Total, "failed_keys", result.Failed, "orgId", o.ID)
+		} else if result.Total > 0 {
+			sa.log.Info("API key migration was successful", "orgId", o.ID, "total_keys", result.Total)
+		} else {
+			sa.log.Debug("No API keys found to migrate", "orgId", o.ID)
+		}
+
+		total += result.Total
+		migrated += result.Migrated
+		failed += result.Failed
+	}
+
+	return nil
 }
 
 func validOrgID(orgID int64) error {
@@ -248,12 +368,21 @@ func validOrgID(orgID int64) error {
 	}
 	return nil
 }
+
 func validServiceAccountID(serviceaccountID int64) error {
 	if serviceaccountID == 0 {
 		return serviceaccounts.ErrServiceAccountInvalidID.Errorf("invalid service account ID 0 has been specified")
 	}
 	return nil
 }
+
+func validServiceAccountUID(saUID string) error {
+	if saUID == "" {
+		return serviceaccounts.ErrServiceAccountInvalidID.Errorf("invalid service account UID has been specified")
+	}
+	return nil
+}
+
 func validServiceAccountTokenID(tokenID int64) error {
 	if tokenID == 0 {
 		return serviceaccounts.ErrServiceAccountInvalidTokenID.Errorf("invalid service account token ID 0 has been specified")

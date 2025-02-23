@@ -38,9 +38,7 @@ export interface AlertRule {
 
 export type GrafanaNotifierType =
   | 'discord'
-  | 'hipchat'
   | 'email'
-  | 'sensu'
   | 'sensugo'
   | 'googlechat'
   | 'threema'
@@ -55,9 +53,15 @@ export type GrafanaNotifierType =
   | 'victorops'
   | 'pushover'
   | 'LINE'
-  | 'kafka';
+  | 'kafka'
+  | 'wecom'
+  | 'webex'
+  | 'mqtt'
+  | 'oncall'
+  | 'sns';
 
 export type CloudNotifierType =
+  | 'oncall' // Only FE implementation for now
   | 'email'
   | 'pagerduty'
   | 'pushover'
@@ -65,13 +69,19 @@ export type CloudNotifierType =
   | 'opsgenie'
   | 'victorops'
   | 'webhook'
-  | 'wechat';
+  | 'wechat'
+  | 'webex'
+  | 'telegram'
+  | 'sns'
+  | 'discord'
+  | 'msteams'
+  | 'jira';
 
 export type NotifierType = GrafanaNotifierType | CloudNotifierType;
-export interface NotifierDTO {
+export interface NotifierDTO<T = NotifierType> {
   name: string;
   description: string;
-  type: NotifierType;
+  type: T;
   heading: string;
   options: NotificationChannelOption[];
   info?: string;
@@ -103,7 +113,7 @@ export interface NotificationChannelDTO {
 }
 
 export type NotificationChannelSecureSettings = Record<string, string | number>;
-export type NotificationChannelSecureFields = Record<string, boolean>;
+export type NotificationChannelSecureFields = Record<string, boolean | ''>;
 
 export interface ChannelTypeSettings {
   [key: string]: any;
@@ -118,6 +128,7 @@ export interface NotificationChannelOption {
     | 'input'
     | 'select'
     | 'checkbox'
+    | 'radio'
     | 'textarea'
     | 'subform'
     | 'subform_array'
@@ -131,10 +142,12 @@ export interface NotificationChannelOption {
   required: boolean;
   secure: boolean;
   selectOptions?: Array<SelectableValue<string>> | null;
-  showWhen: { field: string; is: string };
+  defaultValue?: SelectableValue<string>;
+  showWhen: { field: string; is: string | boolean };
   validationRule: string;
   subformOptions?: NotificationChannelOption[];
   dependsOn: string;
+  setValueAs?: (value: string | boolean) => string | number | boolean | null;
 }
 
 export interface NotificationChannelState {

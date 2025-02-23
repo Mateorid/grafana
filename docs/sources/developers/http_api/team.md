@@ -11,6 +11,10 @@ keywords:
   - team
   - teams
   - group
+labels:
+  products:
+    - enterprise
+    - oss
 title: Team HTTP API
 ---
 
@@ -22,14 +26,12 @@ Access to these API endpoints is restricted as follows:
 
 - All authenticated users are able to view details of teams they are a member of.
 - Organization Admins are able to manage all teams and team members.
-- If you enable `editors_can_admin` configuration flag, then Organization Editors can create teams and manage teams where they are Admin.
-  - If you enable `editors_can_admin` configuration flag, Editors can find out whether a team that they are not members of exists by trying to create a team with the same name.
 
 > If you are running Grafana Enterprise, for some endpoints you'll need to have specific permissions. Refer to [Role-based access control permissions]({{< relref "/docs/grafana/latest/administration/roles-and-permissions/access-control/custom-role-actions-scopes" >}}) for more information.
 
 ## Team Search With Paging
 
-`GET /api/teams/search?perpage=50&page=1&query=myteam`
+`GET /api/teams/search?perpage=50&page=1&query=myteam&sort=memberCount-desc`
 
 or
 
@@ -49,7 +51,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 GET /api/teams/search?perpage=10&page=1&query=mytestteam HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 ```
 
 **Example Response**:
@@ -83,6 +85,8 @@ The `totalCount` field in the response can be used for pagination of the teams l
 
 The `query` parameter is optional and it will return results where the query value is contained in the `name` field. Query values with spaces need to be URL encoded e.g. `query=my%20team`.
 
+The `sort` param is an optional comma separated list of options to order the search result. Accepted values for the sort filter are: ` name-asc`, `name-desc`, `email-asc`, `email-desc`, `memberCount-asc`, `memberCount-desc`. By default, if `sort` is not specified, the teams list will be ordered by `name` in ascending order.
+
 ### Using the name parameter
 
 The `name` parameter returns a single team if the parameter matches the `name` field.
@@ -90,6 +94,7 @@ The `name` parameter returns a single team if the parameter matches the `name` f
 #### Status Codes:
 
 - **200** - Ok
+- **400** - Bad Request
 - **401** - Unauthorized
 - **403** - Permission denied
 - **404** - Team not found (if searching by name)
@@ -112,7 +117,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 GET /api/teams/1 HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 ```
 
 **Example Response**:
@@ -140,7 +145,7 @@ Status Codes:
 
 ## Add Team
 
-The Team `name` needs to be unique. `name` is required and `email`,`orgId` is optional.
+The Team `name` needs to be unique. `name` is required and `email` is optional.
 
 `POST /api/teams`
 
@@ -158,12 +163,11 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 POST /api/teams HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 
 {
   "name": "MyTestTeam",
   "email": "email@test.com",
-  "orgId": 2
 }
 ```
 
@@ -173,7 +177,7 @@ Authorization: Basic YWRtaW46YWRtaW4=
 HTTP/1.1 200
 Content-Type: application/json
 
-{"message":"Team created","teamId":2}
+{"message":"Team created","teamId":2,"uid":"ceaulqadfoav4e"}
 ```
 
 Status Codes:
@@ -203,7 +207,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 PUT /api/teams/2 HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 
 {
   "name": "MyTestTeam",
@@ -246,7 +250,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 DELETE /api/teams/2 HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 ```
 
 **Example Response**:
@@ -283,7 +287,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 GET /api/teams/1/members HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 ```
 
 **Example Response**:
@@ -336,7 +340,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 POST /api/teams/1/members HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 
 {
   "userId": 2
@@ -378,7 +382,7 @@ See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
 DELETE /api/teams/2/members/3 HTTP/1.1
 Accept: application/json
 Content-Type: application/json
-Authorization: Basic YWRtaW46YWRtaW4=
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
 ```
 
 **Example Response**:
@@ -396,6 +400,52 @@ Status Codes:
 - **401** - Unauthorized
 - **403** - Permission denied
 - **404** - Team not found/Team member not found
+
+## Bulk Update Team Members
+
+Allows bulk updating team members and administrators using user emails.
+Will override all current members and administrators for the specified team.
+
+`PUT /api/teams/:teamId/members
+
+**Required permissions**
+
+See note in the [introduction]({{< ref "#team-api" >}}) for an explanation.
+
+| Action                  | Scope    |
+| ----------------------- | -------- |
+| teams.permissions:write | teams:\* |
+
+**Example Request**:
+
+```http
+PUT /api/teams/1/members HTTP/1.1
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer glsa_kcVxDhZtu5ISOZIEt
+
+{
+  "members": ["user1@email.com", "user2@email.com"]
+  "admins": ["user3@email.com"]
+}
+```
+
+**Example Response**:
+
+```http
+HTTP/1.1 200
+Content-Type: application/json
+
+{"message":"Team memberships have been updated"}
+```
+
+Status Codes:
+
+- **200** - Ok
+- **401** - Unauthorized
+- **403** - Permission denied
+- **404** - Team not found/Team member not found
+- **500** - Internal error
 
 ## Get Team Preferences
 

@@ -1400,7 +1400,6 @@
   ],
   "revision": 1,
   "schemaVersion": 38,
-  "style": "dark",
   "tags": [
     "gdev",
     "panel-tests"
@@ -1424,17 +1423,6 @@
       "1h",
       "2h",
       "1d"
-    ],
-    "time_options": [
-      "5m",
-      "15m",
-      "1h",
-      "6h",
-      "12h",
-      "24h",
-      "2d",
-      "7d",
-      "30d"
     ]
   },
   "timezone": "",
