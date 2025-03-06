@@ -7,14 +7,15 @@ import (
 	"net/http"
 
 	"github.com/grafana/grafana/pkg/api/response"
-	"github.com/grafana/grafana/pkg/plugins"
-	"github.com/grafana/grafana/pkg/services/alerting"
+	"github.com/grafana/grafana/pkg/services/apiserver"
 	"github.com/grafana/grafana/pkg/services/dashboards"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 	"github.com/grafana/grafana/pkg/util"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // ToDashboardErrorResponse returns a different response status according to the dashboard error type
-func ToDashboardErrorResponse(ctx context.Context, pluginStore plugins.Store, err error) response.Response {
+func ToDashboardErrorResponse(ctx context.Context, pluginStore pluginstore.Store, err error) response.Response {
 	var dashboardErr dashboards.DashboardErr
 	if ok := errors.As(err, &dashboardErr); ok {
 		if body := dashboardErr.Body(); body != nil {
@@ -30,11 +31,6 @@ func ToDashboardErrorResponse(ctx context.Context, pluginStore plugins.Store, er
 		return response.Error(http.StatusBadRequest, err.Error(), nil)
 	}
 
-	var validationErr alerting.ValidationError
-	if ok := errors.As(err, &validationErr); ok {
-		return response.Error(http.StatusUnprocessableEntity, validationErr.Error(), err)
-	}
-
 	var pluginErr dashboards.UpdatePluginDashboardError
 	if ok := errors.As(err, &pluginErr); ok {
 		message := fmt.Sprintf("The dashboard belongs to plugin %s.", pluginErr.PluginId)
@@ -43,6 +39,10 @@ func ToDashboardErrorResponse(ctx context.Context, pluginStore plugins.Store, er
 			message = fmt.Sprintf("The dashboard belongs to plugin %s.", plugin.Name)
 		}
 		return response.JSON(http.StatusPreconditionFailed, util.DynMap{"status": "plugin-dashboard", "message": message})
+	}
+
+	if apierrors.IsRequestEntityTooLargeError(err) {
+		return response.Error(http.StatusRequestEntityTooLarge, fmt.Sprintf("Dashboard is too large, max is %d MB", apiserver.MaxRequestBodyBytes/1024/1024), err)
 	}
 
 	return response.Error(http.StatusInternalServerError, "Failed to save dashboard", err)

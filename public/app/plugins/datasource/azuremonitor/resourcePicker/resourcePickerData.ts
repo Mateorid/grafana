@@ -1,9 +1,6 @@
-import { uniq } from 'lodash';
+import { DataSourceWithBackend, reportInteraction } from '@grafana/runtime';
 
-import { DataSourceInstanceSettings } from '@grafana/data';
-import { DataSourceWithBackend } from '@grafana/runtime';
-
-import { logsResourceTypes, resourceTypeDisplayNames } from '../azureMetadata';
+import { logsResourceTypes, resourceTypeDisplayNames, resourceTypes } from '../azureMetadata';
 import AzureMonitorDatasource from '../azure_monitor/azure_monitor_datasource';
 import { ResourceRow, ResourceRowGroup, ResourceRowType } from '../components/ResourcePicker/types';
 import {
@@ -15,10 +12,10 @@ import {
   resourceToString,
 } from '../components/ResourcePicker/utils';
 import {
-  AzureDataSourceJsonData,
+  AzureMonitorDataSourceInstanceSettings,
+  AzureMonitorDataSourceJsonData,
   AzureGraphResponse,
   AzureMonitorResource,
-  AzureMonitorLocations,
   AzureMonitorQuery,
   AzureResourceGraphOptions,
   AzureResourceSummaryItem,
@@ -32,18 +29,19 @@ const RESOURCE_GRAPH_URL = '/providers/Microsoft.ResourceGraph/resources?api-ver
 
 const logsSupportedResourceTypesKusto = logsResourceTypes.map((v) => `"${v}"`).join(',');
 
-export type ResourcePickerQueryType = 'logs' | 'metrics';
+export type ResourcePickerQueryType = 'logs' | 'metrics' | 'traces';
 
-export default class ResourcePickerData extends DataSourceWithBackend<AzureMonitorQuery, AzureDataSourceJsonData> {
+export default class ResourcePickerData extends DataSourceWithBackend<
+  AzureMonitorQuery,
+  AzureMonitorDataSourceJsonData
+> {
   private resourcePath: string;
   resultLimit = 200;
   azureMonitorDatasource;
   supportedMetricNamespaces = '';
-  logLocationsMap: Map<string, AzureMonitorLocations> = new Map();
-  logLocations: string[] = [];
 
   constructor(
-    instanceSettings: DataSourceInstanceSettings<AzureDataSourceJsonData>,
+    instanceSettings: AzureMonitorDataSourceInstanceSettings,
     azureMonitorDatasource: AzureMonitorDatasource
   ) {
     super(instanceSettings);
@@ -56,11 +54,6 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
     currentSelection?: AzureMonitorResource[]
   ): Promise<ResourceRowGroup> {
     const subscriptions = await this.getSubscriptions();
-
-    if (this.logLocationsMap.size === 0) {
-      this.logLocationsMap = await this.getLogsLocations(subscriptions);
-      this.logLocations = Array.from(this.logLocationsMap.values()).map((location) => `"${location.name}"`);
-    }
 
     if (!currentSelection) {
       return subscriptions;
@@ -101,7 +94,7 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
     const nestedRows =
       parentRow.type === ResourceRowType.Subscription
         ? await this.getResourceGroupsBySubscriptionId(parentRow.id, type)
-        : await this.getResourcesForResourceGroup(parentRow.id, type);
+        : await this.getResourcesForResourceGroup(parentRow.uri, type);
 
     return addResources(rows, parentRow.uri, nestedRows);
   }
@@ -140,7 +133,7 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
         resourceGroupName: item.resourceGroup,
         type,
         typeLabel: resourceTypeDisplayNames[item.type] || item.type,
-        location: this.logLocationsMap.get(item.location)?.displayName || item.location,
+        location: item.location,
       };
     });
   };
@@ -193,18 +186,24 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
     subscriptionId: string,
     type: ResourcePickerQueryType
   ): Promise<ResourceRowGroup> {
+    // We can use subscription ID for the filtering here as they're unique
+    // The logic of this query is:
+    // Retrieve _all_ resources a user/app registration/identity has access to
+    // Filter by the namespaces that support metrics
+    // Filter to resources contained within the subscription
+    // Conduct a left-outer join on the resourcecontainers table to allow us to get the case-sensitive resource group name
+    // Return the count of resources in a group, the URI, and name of the group in ascending order
     const query = `
-    resources
-     | join kind=inner (
-       ResourceContainers
-       | where type == 'microsoft.resources/subscriptions/resourcegroups'
-       | project resourceGroupURI=id, resourceGroupName=name, resourceGroup, subscriptionId
-     ) on resourceGroup, subscriptionId
-
-     ${await this.filterByType(type)}
-     | where subscriptionId == '${subscriptionId}'
-     | summarize count() by resourceGroupName, resourceGroupURI
-     | order by resourceGroupURI asc`;
+    resources 
+    ${await this.filterByType(type)}
+    | where subscriptionId == '${subscriptionId}'
+    | extend resourceGroupURI = strcat("/subscriptions/", subscriptionId, "/resourcegroups/", resourceGroup) 
+    | join kind=leftouter (resourcecontainers  
+        | where type =~ 'microsoft.resources/subscriptions/resourcegroups'  
+        | project resourceGroupName=name, resourceGroupURI=tolower(id)) on resourceGroupURI 
+    | project resourceGroupName=iff(resourceGroupName != "", resourceGroupName, resourceGroup), resourceGroupURI
+    | summarize count() by resourceGroupName, resourceGroupURI
+    | order by tolower(resourceGroupName) asc `;
 
     let resourceGroups: RawAzureResourceGroupItem[] = [];
     let allFetched = false;
@@ -240,19 +239,36 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
   }
 
   async getResourcesForResourceGroup(
-    resourceGroupId: string,
+    resourceGroupUri: string,
     type: ResourcePickerQueryType
   ): Promise<ResourceRowGroup> {
-    if (!this.logLocations) {
-      return [];
-    }
-    const { data: response } = await this.makeResourceGraphRequest<RawAzureResourceItem[]>(`
-      resources
-      | where id hasprefix "${resourceGroupId}"
-      ${await this.filterByType(type)} and location in (${this.logLocations})
-    `);
+    // We use resource group URI for the filtering here because resource group names are not unique across subscriptions
+    // We also add a slash at the end of the resource group URI to ensure we do not pull resources from a resource group
+    // that has a similar naming prefix e.g. resourceGroup1 and resourceGroup10
+    const query = `
+    resources 
+    | where id hasprefix "${resourceGroupUri}/"
+    ${await this.filterByType(type)}
+    | order by tolower(name) asc`;
 
-    return response.map((item) => {
+    let resources: RawAzureResourceItem[] = [];
+    let allFetched = false;
+    let $skipToken = undefined;
+    while (!allFetched) {
+      // The response may include several pages
+      let options: Partial<AzureResourceGraphOptions> = {};
+      if ($skipToken) {
+        options = {
+          $skipToken,
+        };
+      }
+      const resourceResponse = await this.makeResourceGraphRequest<RawAzureResourceItem[]>(query, 1, options);
+      resources = resources.concat(resourceResponse.data);
+      $skipToken = resourceResponse.$skipToken;
+      allFetched = !$skipToken;
+    }
+
+    return resources.map((item) => {
       const parsedUri = parseResourceURI(item.id);
       if (!parsedUri || !parsedUri.resourceName) {
         throw new Error('unable to fetch resource details');
@@ -264,7 +280,7 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
         resourceGroupName: item.resourceGroup,
         type: ResourceRowType.Resource,
         typeLabel: resourceTypeDisplayNames[item.type] || item.type,
-        locationDisplayName: this.logLocationsMap.get(item.location)?.displayName || item.location,
+        locationDisplayName: item.location,
         location: item.location,
       };
     });
@@ -369,56 +385,42 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
 
   private async fetchAllNamespaces() {
     const subscriptions = await this.getSubscriptions();
-    let supportedMetricNamespaces: string[] = [];
-    for await (const subscription of subscriptions) {
+    reportInteraction('grafana_ds_azuremonitor_subscriptions_loaded', { subscriptions: subscriptions.length });
+
+    let supportedMetricNamespaces: Set<string> = new Set();
+    // Include a predefined set of metric namespaces as a fallback in the case the user cannot query subscriptions
+    resourceTypes.forEach((namespace) => {
+      supportedMetricNamespaces.add(`"${namespace}"`);
+    });
+
+    // We make use of these three regions as they *should* contain every possible namespace
+    const regions = ['westeurope', 'eastus', 'japaneast'];
+    const getNamespacesForRegion = async (region: string) => {
       const namespaces = await this.azureMonitorDatasource.getMetricNamespaces(
         {
-          resourceUri: `/subscriptions/${subscription.id}`,
+          // We only need to run this request against the first available subscription
+          resourceUri: `/subscriptions/${subscriptions[0].id}`,
         },
-        true
+        false,
+        region
       );
       if (namespaces) {
-        const namespaceVals = namespaces.map((namespace) => `"${namespace.value.toLocaleLowerCase()}"`);
-        supportedMetricNamespaces = supportedMetricNamespaces.concat(namespaceVals);
+        for (const namespace of namespaces) {
+          supportedMetricNamespaces.add(`"${namespace.value.toLocaleLowerCase()}"`);
+        }
       }
-    }
+    };
 
-    if (supportedMetricNamespaces.length === 0) {
+    const promises = regions.map((region) => getNamespacesForRegion(region));
+    await Promise.all(promises);
+
+    if (supportedMetricNamespaces.size === 0) {
       throw new Error(
         'Unable to resolve a list of valid metric namespaces. Validate the datasource configuration is correct and required permissions have been granted for all subscriptions. Grafana requires at least the Reader role to be assigned.'
       );
     }
-    this.supportedMetricNamespaces = uniq(supportedMetricNamespaces).join(',');
-  }
 
-  async getLogsLocations(subscriptions: ResourceRowGroup): Promise<Map<string, AzureMonitorLocations>> {
-    const subscriptionIds = subscriptions.map((sub) => sub.id);
-    const locations = await this.azureMonitorDatasource.getLocations(subscriptionIds);
-    const insightsProvider = await this.azureMonitorDatasource.getProvider('Microsoft.Insights');
-    const logsProvider = insightsProvider?.resourceTypes.find((provider) => provider.resourceType === 'logs');
-
-    if (!logsProvider) {
-      return locations;
-    }
-
-    const logsLocations = logsProvider.locations.map((location) => ({
-      displayName: location,
-      name: '',
-      supportsLogs: true,
-    }));
-
-    const logLocationsMap = new Map<string, AzureMonitorLocations>();
-
-    for (const logLocation of logsLocations) {
-      const name =
-        Array.from(locations.values()).find((location) => logLocation.displayName === location.displayName)?.name || '';
-
-      if (name !== '') {
-        logLocationsMap.set(name, { ...logLocation, name });
-      }
-    }
-
-    return logLocationsMap;
+    this.supportedMetricNamespaces = Array.from(supportedMetricNamespaces).join(',');
   }
 
   parseRows(resources: Array<string | AzureMonitorResource>): ResourceRow[] {
@@ -445,7 +447,6 @@ export default class ResourcePickerData extends DataSourceWithBackend<AzureMonit
         uri: resourceToString(resource),
         typeLabel:
           resourceTypeDisplayNames[resource.metricNamespace?.toLowerCase() ?? ''] ?? resource.metricNamespace ?? '',
-        locationDisplayName: this.logLocationsMap.get(resource.region ?? '')?.displayName || resource.region,
         location: resource.region,
       });
     });

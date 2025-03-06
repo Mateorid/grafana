@@ -1,8 +1,7 @@
-import React from 'react';
-
 import { DataSourceJsonData, DataSourcePluginOptionsEditorProps } from '@grafana/data';
 
 import { InlineSwitch } from '../../components/Switch/Switch';
+import { t, Trans } from '../../utils/i18n';
 import { InlineField } from '../Forms/InlineField';
 
 export interface Props<T extends DataSourceJsonData>
@@ -15,11 +14,21 @@ export interface AlertingConfig extends DataSourceJsonData {
 export function AlertingSettings<T extends AlertingConfig>({ options, onOptionsChange }: Props<T>): JSX.Element {
   return (
     <>
-      <h3 className="page-heading">Alerting</h3>
+      <h3 className="page-heading">
+        <Trans i18nKey="grafana-ui.data-source-settings.alerting-settings-heading">Alerting</Trans>
+      </h3>
       <div className="gf-form-group">
         <div className="gf-form-inline">
           <div className="gf-form">
-            <InlineField labelWidth={26} label="Manage alerts via Alerting UI" disabled={options.readOnly}>
+            <InlineField
+              labelWidth={29}
+              label={t('grafana-ui.data-source-settings.alerting-settings-label', 'Manage alert rules in Alerting UI')}
+              disabled={options.readOnly}
+              tooltip={t(
+                'grafana-ui.data-source-settings.alerting-settings-tooltip',
+                'Manage alert rules for this data source. To manage other alerting resources, add an Alertmanager data source.'
+              )}
+            >
               <InlineSwitch
                 value={options.jsonData.manageAlerts !== false}
                 onChange={(event) =>

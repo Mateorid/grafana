@@ -1,16 +1,17 @@
-import React, { PureComponent } from 'react';
-import { DragDropContext, DragStart, Droppable, DropResult } from 'react-beautiful-dnd';
+import { DragDropContext, DragStart, Droppable, DropResult } from '@hello-pangea/dnd';
+import { PureComponent, ReactNode } from 'react';
 
 import {
   CoreApp,
   DataQuery,
   DataSourceInstanceSettings,
-  DataSourceRef,
   EventBusExtended,
   HistoryItem,
   PanelData,
+  getDataSourceRef,
 } from '@grafana/data';
 import { getDataSourceSrv, reportInteraction } from '@grafana/runtime';
+import { getTimeSrv } from 'app/features/dashboard/services/TimeSrv';
 
 import { QueryEditorRow } from './QueryEditorRow';
 
@@ -34,6 +35,7 @@ export interface Props {
   onQueryCopied?: () => void;
   onQueryRemoved?: () => void;
   onQueryToggled?: (queryStatus?: boolean | undefined) => void;
+  queryRowWrapper?: (children: ReactNode, refId: string) => ReactNode;
 }
 
 export class QueryEditorRows extends PureComponent<Props> {
@@ -64,10 +66,7 @@ export class QueryEditorRows extends PureComponent<Props> {
           return item;
         }
 
-        const dataSourceRef: DataSourceRef = {
-          type: dataSource.type,
-          uid: dataSource.uid,
-        };
+        const dataSourceRef = getDataSourceRef(dataSource);
 
         if (item.datasource) {
           const previous = getDataSourceSrv().getInstanceSettings(item.datasource);
@@ -144,6 +143,7 @@ export class QueryEditorRows extends PureComponent<Props> {
       onQueryCopied,
       onQueryRemoved,
       onQueryToggled,
+      queryRowWrapper,
     } = this.props;
 
     return (
@@ -158,7 +158,7 @@ export class QueryEditorRows extends PureComponent<Props> {
                     ? (settings: DataSourceInstanceSettings) => this.onDataSourceChange(settings, index)
                     : undefined;
 
-                  return (
+                  const queryEditorRow = (
                     <QueryEditorRow
                       id={query.refId}
                       index={index}
@@ -176,10 +176,13 @@ export class QueryEditorRows extends PureComponent<Props> {
                       onQueryToggled={onQueryToggled}
                       queries={queries}
                       app={app}
+                      range={getTimeSrv().timeRange()}
                       history={history}
                       eventBus={eventBus}
                     />
                   );
+
+                  return queryRowWrapper ? queryRowWrapper(queryEditorRow, query.refId) : queryEditorRow;
                 })}
                 {provided.placeholder}
               </div>

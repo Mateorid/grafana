@@ -4,18 +4,19 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/dashboardimport"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/plugindashboards"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 )
 
-func ProvideDashboardUpdater(bus bus.Bus, pluginStore plugins.Store, pluginDashboardService plugindashboards.Service,
+func ProvideDashboardUpdater(bus bus.Bus, pluginStore pluginstore.Store, pluginDashboardService plugindashboards.Service,
 	dashboardImportService dashboardimport.Service, pluginSettingsService pluginsettings.Service,
 	dashboardPluginService dashboards.PluginService, dashboardService dashboards.DashboardService) *DashboardUpdater {
 	du := newDashboardUpdater(bus, pluginStore, pluginDashboardService, dashboardImportService,
@@ -24,7 +25,7 @@ func ProvideDashboardUpdater(bus bus.Bus, pluginStore plugins.Store, pluginDashb
 	return du
 }
 
-func newDashboardUpdater(bus bus.Bus, pluginStore plugins.Store,
+func newDashboardUpdater(bus bus.Bus, pluginStore pluginstore.Store,
 	pluginDashboardService plugindashboards.Service, dashboardImportService dashboardimport.Service,
 	pluginSettingsService pluginsettings.Service, dashboardPluginService dashboards.PluginService,
 	dashboardService dashboards.DashboardService) *DashboardUpdater {
@@ -43,7 +44,7 @@ func newDashboardUpdater(bus bus.Bus, pluginStore plugins.Store,
 }
 
 type DashboardUpdater struct {
-	pluginStore            plugins.Store
+	pluginStore            pluginstore.Store
 	pluginDashboardService plugindashboards.Service
 	dashboardImportService dashboardimport.Service
 	pluginSettingsService  pluginsettings.Service
@@ -66,16 +67,17 @@ func (du *DashboardUpdater) updateAppDashboards() {
 		if !pluginSetting.Enabled {
 			continue
 		}
+		ctx, _ := identity.WithServiceIdentity(context.Background(), pluginSetting.OrgID)
 
-		if pluginDef, exists := du.pluginStore.Plugin(context.Background(), pluginSetting.PluginID); exists {
+		if pluginDef, exists := du.pluginStore.Plugin(ctx, pluginSetting.PluginID); exists {
 			if pluginDef.Info.Version != pluginSetting.PluginVersion {
-				du.syncPluginDashboards(context.Background(), pluginDef, pluginSetting.OrgID)
+				du.syncPluginDashboards(ctx, pluginDef, pluginSetting.OrgID)
 			}
 		}
 	}
 }
 
-func (du *DashboardUpdater) syncPluginDashboards(ctx context.Context, plugin plugins.PluginDTO, orgID int64) {
+func (du *DashboardUpdater) syncPluginDashboards(ctx context.Context, plugin pluginstore.Plugin, orgID int64) {
 	du.logger.Info("Syncing plugin dashboards to DB", "pluginId", plugin.ID)
 
 	// Get plugin dashboards
@@ -95,7 +97,7 @@ func (du *DashboardUpdater) syncPluginDashboards(ctx context.Context, plugin plu
 		if dash.Removed {
 			du.logger.Info("Deleting plugin dashboard", "pluginId", plugin.ID, "dashboard", dash.Slug)
 
-			if err := du.dashboardService.DeleteDashboard(ctx, dash.DashboardId, orgID); err != nil {
+			if err := du.dashboardService.DeleteDashboard(ctx, dash.DashboardId, dash.UID, orgID); err != nil {
 				du.logger.Error("Failed to auto update app dashboard", "pluginId", plugin.ID, "error", err)
 				return
 			}
@@ -150,7 +152,7 @@ func (du *DashboardUpdater) handlePluginStateChanged(ctx context.Context, event 
 
 		for _, dash := range queryResult {
 			du.logger.Info("Deleting plugin dashboard", "pluginId", event.PluginId, "dashboard", dash.Slug)
-			if err := du.dashboardService.DeleteDashboard(ctx, dash.ID, dash.OrgID); err != nil {
+			if err := du.dashboardService.DeleteDashboard(ctx, dash.ID, dash.UID, dash.OrgID); err != nil {
 				return err
 			}
 		}
@@ -177,7 +179,6 @@ func (du *DashboardUpdater) autoUpdateAppDashboard(ctx context.Context, pluginDa
 			{Action: dashboards.ActionDashboardsWrite, Scope: dashboards.ScopeFoldersAll},
 		}),
 		Path:      pluginDashInfo.Reference,
-		FolderId:  0,
 		Dashboard: resp.Dashboard.Data,
 		Overwrite: true,
 		Inputs:    nil,

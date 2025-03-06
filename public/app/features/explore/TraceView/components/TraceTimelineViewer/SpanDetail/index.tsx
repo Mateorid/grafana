@@ -13,20 +13,29 @@
 // limitations under the License.
 
 import { css } from '@emotion/css';
+import { SpanStatusCode } from '@opentelemetry/api';
 import cx from 'classnames';
-import React from 'react';
 
-import { dateTimeFormat, GrafanaTheme2, LinkModel, TimeZone } from '@grafana/data';
-import { config, reportInteraction } from '@grafana/runtime';
-import { Button, DataLinkButton, Icon, TextArea, useStyles2 } from '@grafana/ui';
+import {
+  CoreApp,
+  DataFrame,
+  dateTimeFormat,
+  GrafanaTheme2,
+  LinkModel,
+  TimeRange,
+  TraceKeyValuePair,
+  TraceLog,
+} from '@grafana/data';
+import { TraceToProfilesOptions } from '@grafana/o11y-ds-frontend';
+import { TimeZone } from '@grafana/schema';
+import { Divider, Icon, TextArea, useStyles2 } from '@grafana/ui';
 
+import { pyroscopeProfileIdTagKey } from '../../../createSpanLink';
 import { autoColor } from '../../Theme';
-import { Divider } from '../../common/Divider';
 import LabeledList from '../../common/LabeledList';
+import { KIND, LIBRARY_NAME, LIBRARY_VERSION, STATUS, STATUS_MESSAGE, TRACE_STATE } from '../../constants/span';
 import { SpanLinkFunc, TNil } from '../../types';
-import { TraceKeyValuePair, TraceLink, TraceLog, TraceSpan, TraceSpanReference } from '../../types/trace';
-import { uAlignIcon, ubM0, ubMb1, ubMy1, ubTxRightAlign } from '../../uberUtilityStyles';
-import { TopOfViewRefType } from '../VirtualizedTraceView';
+import { TraceLink, TraceSpan, TraceSpanReference } from '../../types/trace';
 import { formatDuration } from '../utils';
 
 import AccordianKeyValues from './AccordianKeyValues';
@@ -34,73 +43,103 @@ import AccordianLogs from './AccordianLogs';
 import AccordianReferences from './AccordianReferences';
 import AccordianText from './AccordianText';
 import DetailState from './DetailState';
+import { getSpanDetailLinkButtons } from './SpanDetailLinkButtons';
+import SpanFlameGraph from './SpanFlameGraph';
 
 const getStyles = (theme: GrafanaTheme2) => {
   return {
-    header: css`
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0 1rem;
-      margin-bottom: 0.25rem;
-    `,
-    listWrapper: css`
-      overflow: hidden;
-    `,
-    debugInfo: css`
-      label: debugInfo;
-      display: block;
-      letter-spacing: 0.25px;
-      margin: 0.5em 0 -0.75em;
-      text-align: right;
-    `,
-    debugLabel: css`
-      label: debugLabel;
-      &::before {
-        color: ${autoColor(theme, '#bbb')};
-        content: attr(data-label);
-      }
-    `,
-    debugValue: css`
-      label: debugValue;
-      background-color: inherit;
-      border: none;
-      color: ${autoColor(theme, '#888')};
-      cursor: pointer;
-      &:hover {
-        color: ${autoColor(theme, '#333')};
-      }
-    `,
-    AccordianWarnings: css`
-      label: AccordianWarnings;
-      background: ${autoColor(theme, '#fafafa')};
-      border: 1px solid ${autoColor(theme, '#e4e4e4')};
-      margin-bottom: 0.25rem;
-    `,
-    AccordianWarningsHeader: css`
-      label: AccordianWarningsHeader;
-      background: ${autoColor(theme, '#fff7e6')};
-      padding: 0.25rem 0.5rem;
-      &:hover {
-        background: ${autoColor(theme, '#ffe7ba')};
-      }
-    `,
-    AccordianWarningsHeaderOpen: css`
-      label: AccordianWarningsHeaderOpen;
-      border-bottom: 1px solid ${autoColor(theme, '#e8e8e8')};
-    `,
-    AccordianWarningsLabel: css`
-      label: AccordianWarningsLabel;
-      color: ${autoColor(theme, '#d36c08')};
-    `,
-    Textarea: css`
-      word-break: break-all;
-      white-space: pre;
-    `,
-    LinkIcon: css`
-      font-size: 1.5em;
-    `,
+    header: css({
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: '0 1rem',
+      marginBottom: '0.25rem',
+    }),
+    listWrapper: css({
+      overflow: 'hidden',
+    }),
+    list: css({
+      textAlign: 'right',
+    }),
+    operationName: css({
+      margin: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      flexBasis: '50%',
+      flexGrow: 0,
+      flexShrink: 0,
+    }),
+    debugInfo: css({
+      label: 'debugInfo',
+      display: 'block',
+      letterSpacing: '0.25px',
+      margin: '0.5em 0 -0.75em',
+      textAlign: 'right',
+    }),
+    debugLabel: css({
+      label: 'debugLabel',
+      '&::before': {
+        color: autoColor(theme, '#bbb'),
+        content: 'attr(data-label)',
+      },
+    }),
+    debugValue: css({
+      label: 'debugValue',
+      backgroundColor: 'inherit',
+      border: 'none',
+      color: autoColor(theme, '#888'),
+      cursor: 'pointer',
+      '&:hover': {
+        color: autoColor(theme, '#333'),
+      },
+    }),
+    AccordianWarnings: css({
+      label: 'AccordianWarnings',
+      background: autoColor(theme, '#fafafa'),
+      border: `1px solid ${autoColor(theme, '#e4e4e4')}`,
+      marginBottom: '0.25rem',
+    }),
+    AccordianWarningsHeader: css({
+      label: 'AccordianWarningsHeader',
+      background: autoColor(theme, '#fff7e6'),
+      padding: '0.25rem 0.5rem',
+      '&:hover': {
+        background: autoColor(theme, '#ffe7ba'),
+      },
+    }),
+    AccordianWarningsHeaderOpen: css({
+      label: 'AccordianWarningsHeaderOpen',
+      borderBottom: `1px solid ${autoColor(theme, '#e8e8e8')}`,
+    }),
+    AccordianWarningsLabel: css({
+      label: 'AccordianWarningsLabel',
+      color: autoColor(theme, '#d36c08'),
+    }),
+    AccordianKeyValuesItem: css({
+      marginBottom: theme.spacing(0.5),
+    }),
+    Textarea: css({
+      wordBreak: 'break-all',
+      whiteSpace: 'pre',
+    }),
+    LinkIcon: css({
+      fontSize: '1.5em',
+    }),
+    linkList: css({
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: '10px',
+    }),
   };
+};
+
+export const alignIcon = css({
+  margin: '-0.2rem 0.25rem 0 0',
+});
+
+export type TraceFlameGraphs = {
+  [spanID: string]: DataFrame;
 };
 
 export type SpanDetailProps = {
@@ -110,9 +149,12 @@ export type SpanDetailProps = {
   logsToggle: (spanID: string) => void;
   processToggle: (spanID: string) => void;
   span: TraceSpan;
+  traceToProfilesOptions?: TraceToProfilesOptions;
   timeZone: TimeZone;
   tagsToggle: (spanID: string) => void;
   traceStartTime: number;
+  traceDuration: number;
+  traceName: string;
   warningsToggle: (spanID: string) => void;
   stackTracesToggle: (spanID: string) => void;
   referenceItemToggle: (spanID: string, reference: TraceSpanReference) => void;
@@ -120,8 +162,12 @@ export type SpanDetailProps = {
   createSpanLink?: SpanLinkFunc;
   focusedSpanId?: string;
   createFocusSpanLink: (traceId: string, spanId: string) => LinkModel;
-  topOfViewRefType?: TopOfViewRefType;
   datasourceType: string;
+  traceFlameGraphs: TraceFlameGraphs;
+  setTraceFlameGraphs: (flameGraphs: TraceFlameGraphs) => void;
+  setRedrawListView: (redraw: {}) => void;
+  timeRange: TimeRange;
+  app: CoreApp;
 };
 
 export default function SpanDetail(props: SpanDetailProps) {
@@ -134,14 +180,21 @@ export default function SpanDetail(props: SpanDetailProps) {
     span,
     tagsToggle,
     traceStartTime,
+    traceDuration,
+    traceName,
     warningsToggle,
     stackTracesToggle,
     referencesToggle,
     referenceItemToggle,
     createSpanLink,
     createFocusSpanLink,
-    topOfViewRefType,
     datasourceType,
+    traceFlameGraphs,
+    setTraceFlameGraphs,
+    traceToProfilesOptions,
+    setRedrawListView,
+    timeRange,
+    app,
   } = props;
   const {
     isTagsOpen,
@@ -166,7 +219,7 @@ export default function SpanDetail(props: SpanDetailProps) {
     stackTraces,
   } = span;
   const { timeZone } = props;
-  const overviewItems = [
+  let overviewItems = [
     {
       key: 'svc',
       label: 'Service:',
@@ -192,74 +245,92 @@ export default function SpanDetail(props: SpanDetailProps) {
         ]
       : []),
   ];
+
   const styles = useStyles2(getStyles);
 
-  let logLinkButton: JSX.Element | undefined = undefined;
-  if (createSpanLink) {
-    const links = createSpanLink(span);
-    if (links?.logLinks) {
-      logLinkButton = (
-        <DataLinkButton
-          link={{
-            ...links.logLinks[0],
-            title: 'Logs for this span',
-            target: '_blank',
-            origin: links.logLinks[0].field,
-            onClick: (event: React.MouseEvent) => {
-              reportInteraction('grafana_traces_trace_view_span_link_clicked', {
-                datasourceType: datasourceType,
-                grafana_version: config.buildInfo.version,
-                type: 'log',
-                location: 'spanDetails',
-              });
-              links?.logLinks?.[0].onClick?.(event);
-            },
-          }}
-          buttonProps={{ icon: 'gf-logs' }}
-        />
-      );
-    } else {
-      logLinkButton = (
-        <Button
-          variant="primary"
-          size="sm"
-          icon={'gf-logs'}
-          disabled
-          tooltip={
-            'We did not match any variables between the link and this span. Check your configuration or this span attributes.'
-          }
-        >
-          Logs for this span
-        </Button>
-      );
-    }
+  if (span.kind) {
+    overviewItems.push({
+      key: KIND,
+      label: 'Kind:',
+      value: span.kind,
+    });
   }
+  if (span.statusCode !== undefined) {
+    overviewItems.push({
+      key: STATUS,
+      label: 'Status:',
+      value: SpanStatusCode[span.statusCode].toLowerCase(),
+    });
+  }
+  if (span.statusMessage) {
+    overviewItems.push({
+      key: STATUS_MESSAGE,
+      label: 'Status Message:',
+      value: span.statusMessage,
+    });
+  }
+  if (span.instrumentationLibraryName) {
+    overviewItems.push({
+      key: LIBRARY_NAME,
+      label: 'Library Name:',
+      value: span.instrumentationLibraryName,
+    });
+  }
+  if (span.instrumentationLibraryVersion) {
+    overviewItems.push({
+      key: LIBRARY_VERSION,
+      label: 'Library Version:',
+      value: span.instrumentationLibraryVersion,
+    });
+  }
+  if (span.traceState) {
+    overviewItems.push({
+      key: TRACE_STATE,
+      label: 'Trace State:',
+      value: span.traceState,
+    });
+  }
+
+  const { profileLinkButtons, logLinkButton, sessionLinkButton } = getSpanDetailLinkButtons({
+    span,
+    createSpanLink,
+    datasourceType,
+    traceToProfilesOptions,
+    timeRange,
+    app,
+  });
 
   const focusSpanLink = createFocusSpanLink(traceID, spanID);
   return (
     <div data-testid="span-detail-component">
       <div className={styles.header}>
-        <h2 className={cx(ubM0)}>{operationName}</h2>
+        <h2 className={styles.operationName} title={operationName}>
+          {operationName}
+        </h2>
         <div className={styles.listWrapper}>
-          <LabeledList className={ubTxRightAlign} divider={true} items={overviewItems} />
+          <LabeledList className={styles.list} divider={true} items={overviewItems} />
         </div>
       </div>
-      {logLinkButton}
-      <Divider className={ubMy1} type={'horizontal'} />
+      <div className={styles.linkList}>
+        {logLinkButton}
+        {profileLinkButtons}
+        {sessionLinkButton}
+      </div>
+      <Divider spacing={1} />
       <div>
         <div>
           <AccordianKeyValues
             data={tags}
-            label="Attributes"
+            label="Span Attributes"
             linksGetter={linksGetter}
             isOpen={isTagsOpen}
             onToggle={() => tagsToggle(spanID)}
           />
           {process.tags && (
             <AccordianKeyValues
-              className={ubMb1}
+              className={styles.AccordianKeyValuesItem}
               data={process.tags}
-              label="Resource"
+              label="Resource Attributes"
               linksGetter={linksGetter}
               isOpen={isProcessOpen}
               onToggle={() => processToggle(spanID)}
@@ -287,7 +358,7 @@ export default function SpanDetail(props: SpanDetailProps) {
             onToggle={() => warningsToggle(spanID)}
           />
         )}
-        {stackTraces && stackTraces.length && (
+        {stackTraces?.length ? (
           <AccordianText
             label="Stack trace"
             data={stackTraces}
@@ -314,7 +385,7 @@ export default function SpanDetail(props: SpanDetailProps) {
             }}
             onToggle={() => stackTracesToggle(spanID)}
           />
-        )}
+        ) : null}
         {references && references.length > 0 && (references.length > 1 || references[0].refType !== 'CHILD_OF') && (
           <AccordianReferences
             data={references}
@@ -325,29 +396,41 @@ export default function SpanDetail(props: SpanDetailProps) {
             createFocusSpanLink={createFocusSpanLink}
           />
         )}
-        {topOfViewRefType === TopOfViewRefType.Explore && (
-          <small className={styles.debugInfo}>
-            <a
-              {...focusSpanLink}
-              onClick={(e) => {
-                // click handling logic copied from react router:
-                // https://github.com/remix-run/react-router/blob/997b4d67e506d39ac6571cb369d6d2d6b3dda557/packages/react-router-dom/index.tsx#L392-L394s
-                if (
-                  focusSpanLink.onClick &&
-                  e.button === 0 && // Ignore everything but left clicks
-                  (!e.currentTarget.target || e.currentTarget.target === '_self') && // Let browser handle "target=_blank" etc.
-                  !(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) // Ignore clicks with modifier keys
-                ) {
-                  e.preventDefault();
-                  focusSpanLink.onClick(e);
-                }
-              }}
-            >
-              <Icon name={'link'} className={cx(uAlignIcon, styles.LinkIcon)}></Icon>
-            </a>
-            <span className={styles.debugLabel} data-label="SpanID:" /> {spanID}
-          </small>
+        {span.tags.some((tag) => tag.key === pyroscopeProfileIdTagKey) && (
+          <SpanFlameGraph
+            span={span}
+            timeZone={timeZone}
+            traceFlameGraphs={traceFlameGraphs}
+            setTraceFlameGraphs={setTraceFlameGraphs}
+            traceToProfilesOptions={traceToProfilesOptions}
+            setRedrawListView={setRedrawListView}
+            traceDuration={traceDuration}
+            traceName={traceName}
+          />
         )}
+        <small className={styles.debugInfo}>
+          {/* TODO: fix keyboard a11y */}
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+          <a
+            {...focusSpanLink}
+            onClick={(e) => {
+              // click handling logic copied from react router:
+              // https://github.com/remix-run/react-router/blob/997b4d67e506d39ac6571cb369d6d2d6b3dda557/packages/react-router-dom/index.tsx#L392-L394s
+              if (
+                focusSpanLink.onClick &&
+                e.button === 0 && // Ignore everything but left clicks
+                (!e.currentTarget.target || e.currentTarget.target === '_self') && // Let browser handle "target=_blank" etc.
+                !(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) // Ignore clicks with modifier keys
+              ) {
+                e.preventDefault();
+                focusSpanLink.onClick(e);
+              }
+            }}
+          >
+            <Icon name={'link'} className={cx(alignIcon, styles.LinkIcon)}></Icon>
+          </a>
+          <span className={styles.debugLabel} data-label="SpanID:" /> {spanID}
+        </small>
       </div>
     </div>
   );

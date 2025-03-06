@@ -1,7 +1,7 @@
-import React, { PureComponent } from 'react';
+import { PureComponent } from 'react';
 
 import { selectors } from '@grafana/e2e-selectors';
-import { Button, LoadingPlaceholder } from '@grafana/ui';
+import { Button, LoadingPlaceholder, ScrollContainer } from '@grafana/ui';
 import { Trans } from 'app/core/internationalization';
 import { UserDTO, UserOrg } from 'app/types';
 
@@ -30,7 +30,7 @@ export class UserOrganizations extends PureComponent<Props> {
           <Trans i18nKey="user-orgs.title">Organizations</Trans>
         </h3>
 
-        <div className="gf-form-group">
+        <ScrollContainer overflowY="visible" overflowX="auto" width="100%">
           <table className="filter-table form-inline" data-testid={selectors.components.UserProfile.orgsTable}>
             <thead>
               <tr>
@@ -71,7 +71,7 @@ export class UserOrganizations extends PureComponent<Props> {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollContainer>
       </div>
     );
   }

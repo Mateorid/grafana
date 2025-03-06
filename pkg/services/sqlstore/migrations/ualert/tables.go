@@ -24,6 +24,7 @@ func AddTablesMigrations(mg *migrator.Migrator) {
 	mg.AddMigration("add last_applied column to alert_configuration_history", migrator.NewAddColumnMigration(migrator.Table{Name: "alert_configuration_history"}, &migrator.Column{
 		Name: "last_applied", Type: migrator.DB_Int, Nullable: false, Default: "0",
 	}))
+	// End of migration log, add new migrations above this line.
 }
 
 // historicalTableMigrations contains those migrations that existed prior to creating the improved messaging around migration immutability.
@@ -188,6 +189,10 @@ func alertInstanceMigration(mg *migrator.Migrator) {
 		migrator.NewAddColumnMigration(alertInstance, &migrator.Column{
 			Name: "current_reason", Type: migrator.DB_NVarchar, Length: DefaultFieldMaxLength, Nullable: true,
 		}))
+
+	mg.AddMigration("add result_fingerprint column to alert_instance", migrator.NewAddColumnMigration(alertInstance, &migrator.Column{
+		Name: "result_fingerprint", Type: migrator.DB_NVarchar, Length: 16, Nullable: true,
+	}))
 }
 
 func addAlertRuleMigrations(mg *migrator.Migrator, defaultIntervalSeconds int64) {
@@ -297,6 +302,8 @@ func addAlertRuleMigrations(mg *migrator.Migrator, defaultIntervalSeconds int64)
 UPDATE alert_rule SET is_paused = false;`))
 }
 
+var alertRuleVersionUDX_OrgIdRuleUIDVersion = &migrator.Index{Cols: []string{"rule_org_id", "rule_uid", "version"}, Type: migrator.UniqueIndex}
+
 func addAlertRuleVersionMigrations(mg *migrator.Migrator) {
 	// DO NOT EDIT
 	alertRuleVersion := migrator.Table{
@@ -320,12 +327,12 @@ func addAlertRuleVersionMigrations(mg *migrator.Migrator) {
 			{Name: "exec_err_state", Type: migrator.DB_NVarchar, Length: 15, Nullable: false, Default: "'Alerting'"},
 		},
 		Indices: []*migrator.Index{
-			{Cols: []string{"rule_org_id", "rule_uid", "version"}, Type: migrator.UniqueIndex},
+			alertRuleVersionUDX_OrgIdRuleUIDVersion,
 			{Cols: []string{"rule_org_id", "rule_namespace_uid", "rule_group"}, Type: migrator.IndexType},
 		},
 	}
 	mg.AddMigration("create alert_rule_version table", migrator.NewAddTableMigration(alertRuleVersion))
-	mg.AddMigration("add index in alert_rule_version table on rule_org_id, rule_uid and version columns", migrator.NewAddIndexMigration(alertRuleVersion, alertRuleVersion.Indices[0]))
+	mg.AddMigration("add index in alert_rule_version table on rule_org_id, rule_uid and version columns", migrator.NewAddIndexMigration(alertRuleVersion, alertRuleVersionUDX_OrgIdRuleUIDVersion))
 	mg.AddMigration("add index in alert_rule_version table on rule_org_id, rule_namespace_uid and rule_group columns", migrator.NewAddIndexMigration(alertRuleVersion, alertRuleVersion.Indices[1]))
 
 	mg.AddMigration("alter alert_rule_version table data column to mediumtext in mysql", migrator.NewRawSQLMigration("").
@@ -491,9 +498,6 @@ func addAlertImageMigrations(mg *migrator.Migrator) {
 }
 
 func extractAlertmanagerConfigurationHistoryMigration(mg *migrator.Migrator) {
-	if !mg.Cfg.UnifiedAlerting.IsEnabled() {
-		return
-	}
 	// Since it's not always consistent as to what state the org ID indexes are in, just drop them all and rebuild from scratch.
 	// This is not expensive since this table is guaranteed to have a small number of rows.
 	mg.AddMigration("drop non-unique orgID index on alert_configuration", migrator.NewDropIndexMigration(migrator.Table{Name: "alert_configuration"}, &migrator.Index{Cols: []string{"org_id"}}))

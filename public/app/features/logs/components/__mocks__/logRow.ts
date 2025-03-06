@@ -1,4 +1,6 @@
-import { LogLevel, LogRowModel, MutableDataFrame } from '@grafana/data';
+import { FieldType, LogLevel, LogRowModel, LogsSortOrder, toDataFrame } from '@grafana/data';
+
+import { LogListModel, preProcessLogs, PreProcessOptions } from '../panel/processing';
 
 export const createLogRow = (overrides?: Partial<LogRowModel>): LogRowModel => {
   const uid = overrides?.uid || '1';
@@ -8,7 +10,18 @@ export const createLogRow = (overrides?: Partial<LogRowModel>): LogRowModel => {
   return {
     entryFieldIndex: 0,
     rowIndex: 0,
-    dataFrame: new MutableDataFrame(),
+    dataFrame: toDataFrame({
+      refId: 'A',
+      fields: [
+        { name: 'Time', type: FieldType.time, values: [0, 1] },
+        {
+          name: 'Line',
+          type: FieldType.string,
+          values: ['line1', 'line2'],
+        },
+        { name: 'labels', type: FieldType.other, values: [{ app: 'app01' }, { app: 'app02' }] },
+      ],
+    }),
     uid,
     logLevel: LogLevel.info,
     entry,
@@ -24,4 +37,17 @@ export const createLogRow = (overrides?: Partial<LogRowModel>): LogRowModel => {
     searchWords: [],
     ...overrides,
   };
+};
+
+export const createLogLine = (
+  overrides?: Partial<LogRowModel>,
+  processOptions: PreProcessOptions = {
+    escape: false,
+    order: LogsSortOrder.Descending,
+    timeZone: 'browser',
+    wrap: false,
+  }
+): LogListModel => {
+  const logs = preProcessLogs([createLogRow(overrides)], processOptions);
+  return logs[0];
 };

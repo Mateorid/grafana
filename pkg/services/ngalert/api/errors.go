@@ -3,14 +3,20 @@ package api
 import (
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/apimachinery/errutil"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	apimodels "github.com/grafana/grafana/pkg/services/ngalert/api/tooling/definitions"
+	"github.com/grafana/grafana/pkg/services/ngalert/models"
 )
 
 var (
 	errUnexpectedDatasourceType = errors.New("unexpected datasource type")
+
+	// errFolderAccess is used as a wrapper to propagate folder related errors and correctly map to the response status
+	errFolderAccess = errors.New("cannot get folder")
 )
 
 func unexpectedDatasourceTypeError(actual string, expected string) error {
@@ -25,14 +31,23 @@ func backendTypeDoesNotMatchPayloadTypeError(backendType apimodels.Backend, payl
 }
 
 func errorToResponse(err error) response.Response {
+	if errors.As(err, &errutil.Error{}) {
+		return response.Err(err)
+	}
 	if errors.Is(err, datasources.ErrDataSourceNotFound) {
-		return ErrResp(404, err, "")
+		return ErrResp(http.StatusNotFound, err, "")
 	}
 	if errors.Is(err, errUnexpectedDatasourceType) {
 		return ErrResp(400, err, "")
 	}
-	if errors.Is(err, ErrAuthorization) {
-		return ErrResp(401, err, "")
+	if errors.Is(err, errFolderAccess) {
+		return toNamespaceErrorResponse(err)
 	}
-	return ErrResp(500, err, "")
+	if errors.Is(err, datasources.ErrDataSourceAccessDenied) {
+		return ErrResp(http.StatusForbidden, err, "")
+	}
+	if errors.Is(err, models.ErrQuotaReached) {
+		return ErrResp(http.StatusForbidden, err, "")
+	}
+	return ErrResp(http.StatusInternalServerError, err, "")
 }

@@ -14,9 +14,9 @@
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import React from 'react';
 
 import { createTheme } from '@grafana/data';
+import { setPluginLinksHook } from '@grafana/runtime';
 
 import DetailState from './SpanDetail/DetailState';
 import { UnthemedSpanDetailRow, SpanDetailRowProps } from './SpanDetailRow';
@@ -25,6 +25,7 @@ const testSpan = {
   spanID: 'testSpanID',
   traceID: 'testTraceID',
   depth: 3,
+  tags: [],
   process: {
     serviceName: 'some-service',
     tags: [{ key: 'tag-key', value: 'tag-value' }],
@@ -46,12 +47,26 @@ const setup = (propOverrides?: SpanDetailRowProps) => {
     tagsToggle: jest.fn(),
     traceStartTime: 1000,
     theme: createTheme(),
+    traceFlameGraphs: {},
+    timeRange: {
+      raw: {
+        from: 0,
+        to: 1000000000000,
+      },
+    },
     ...propOverrides,
   };
   return render(<UnthemedSpanDetailRow {...(props as SpanDetailRowProps)} />);
 };
 
 describe('SpanDetailRow tests', () => {
+  beforeEach(() => {
+    setPluginLinksHook(() => ({
+      isLoading: false,
+      links: [],
+    }));
+  });
+
   it('renders without exploding', () => {
     expect(() => setup()).not.toThrow();
   });

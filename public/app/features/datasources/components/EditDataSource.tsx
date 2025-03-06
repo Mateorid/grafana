@@ -1,12 +1,18 @@
 import { AnyAction } from '@reduxjs/toolkit';
-import React from 'react';
+import { cloneDeep } from 'lodash';
+import { useMemo } from 'react';
+import * as React from 'react';
 
 import {
   DataSourcePluginContextProvider,
   DataSourcePluginMeta,
   DataSourceSettings as DataSourceSettingsType,
+  PluginExtensionPoints,
+  PluginExtensionDataSourceConfigContext,
+  DataSourceUpdatedSuccessfully,
 } from '@grafana/data';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { getDataSourceSrv, usePluginComponents, UsePluginComponentsResult } from '@grafana/runtime';
+import appEvents from 'app/core/app_events';
 import PageLoader from 'app/core/components/PageLoader/PageLoader';
 import { DataSourceSettingsState, useDispatch } from 'app/types';
 
@@ -24,6 +30,7 @@ import {
   useTestDataSource,
   useUpdateDatasource,
 } from '../state';
+import { trackDsConfigClicked, trackDsConfigUpdated } from '../tracking';
 import { DataSourceRights } from '../types';
 
 import { BasicSettings } from './BasicSettings';
@@ -110,25 +117,39 @@ export function EditDataSourceView({
   const { plugin, loadError, testingStatus, loading } = dataSourceSettings;
   const { readOnly, hasWriteRights, hasDeleteRights } = dataSourceRights;
   const hasDataSource = dataSource.id > 0;
+  const { components, isLoading } = useDataSourceConfigPluginExtensions();
 
   const dsi = getDataSourceSrv()?.getInstanceSettings(dataSource.uid);
 
-  const hasAlertingEnabled = Boolean(dsi?.meta?.alerting ?? false);
-  const isAlertManagerDatasource = dsi?.type === 'alertmanager';
-  const alertingSupported = hasAlertingEnabled || isAlertManagerDatasource;
-
   const onSubmit = async (e: React.MouseEvent<HTMLButtonElement> | React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    await onUpdate({ ...dataSource });
+    trackDsConfigClicked('save_and_test');
+
+    try {
+      await onUpdate({ ...dataSource });
+      trackDsConfigUpdated({ item: 'success' });
+      appEvents.publish(new DataSourceUpdatedSuccessfully());
+    } catch (error) {
+      trackDsConfigUpdated({ item: 'fail' });
+      return;
+    }
 
     onTest();
   };
 
   if (loadError) {
-    return <DataSourceLoadError dataSourceRights={dataSourceRights} onDelete={onDelete} />;
+    return (
+      <DataSourceLoadError
+        dataSourceRights={dataSourceRights}
+        onDelete={() => {
+          trackDsConfigClicked('delete');
+          onDelete();
+        }}
+      />
+    );
   }
 
-  if (loading) {
+  if (loading || isLoading) {
     return <PageLoader />;
   }
 
@@ -158,7 +179,6 @@ export function EditDataSourceView({
         isDefault={dataSource.isDefault}
         onDefaultChange={onDefaultChange}
         onNameChange={onNameChange}
-        alertingSupported={alertingSupported}
         disabled={readOnly || !hasWriteRights}
       />
 
@@ -173,16 +193,70 @@ export function EditDataSourceView({
         </DataSourcePluginContextProvider>
       )}
 
-      <DataSourceTestingStatus testingStatus={testingStatus} />
+      {/* Extension point */}
+      {components.map((Component) => {
+        return (
+          <div key={Component.meta.id}>
+            <Component
+              context={{
+                dataSource: cloneDeep(dataSource),
+                dataSourceMeta: dataSourceMeta,
+                testingStatus,
+                setJsonData: (jsonData) =>
+                  onOptionsChange({
+                    ...dataSource,
+                    jsonData: { ...dataSource.jsonData, ...jsonData },
+                  }),
+                setSecureJsonData: (secureJsonData) =>
+                  onOptionsChange({
+                    ...dataSource,
+                    secureJsonData: { ...dataSource.secureJsonData, ...secureJsonData },
+                  }),
+              }}
+            />
+          </div>
+        );
+      })}
+
+      <DataSourceTestingStatus testingStatus={testingStatus} exploreUrl={exploreUrl} dataSource={dataSource} />
 
       <ButtonRow
         onSubmit={onSubmit}
-        onDelete={onDelete}
-        onTest={onTest}
-        exploreUrl={exploreUrl}
-        canSave={!readOnly && hasWriteRights}
+        onDelete={() => {
+          trackDsConfigClicked('delete');
+          onDelete();
+        }}
+        onTest={() => {
+          trackDsConfigClicked('test');
+          onTest();
+        }}
         canDelete={!readOnly && hasDeleteRights}
+        canSave={!readOnly && hasWriteRights}
       />
     </form>
   );
+}
+
+type DataSourceConfigPluginExtensionProps = {
+  context: PluginExtensionDataSourceConfigContext;
+};
+
+function useDataSourceConfigPluginExtensions(): UsePluginComponentsResult<DataSourceConfigPluginExtensionProps> {
+  const { components, isLoading } = usePluginComponents<DataSourceConfigPluginExtensionProps>({
+    extensionPointId: PluginExtensionPoints.DataSourceConfig,
+  });
+
+  return useMemo(() => {
+    const allowedComponents = components.filter((component) => {
+      switch (component.meta.pluginId) {
+        case 'grafana-pdc-app':
+        case 'grafana-auth-app':
+          return true;
+        default:
+          return false;
+      }
+    });
+
+    return { components: allowedComponents, isLoading };
+  }, [components, isLoading]);
 }

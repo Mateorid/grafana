@@ -1,9 +1,9 @@
 import { screen, render } from '@testing-library/react';
-import React from 'react';
 import { Provider } from 'react-redux';
 
 import { PluginState } from '@grafana/data';
-import { setAngularLoader } from '@grafana/runtime';
+import { setAngularLoader, setPluginComponentsHook } from '@grafana/runtime';
+import { createComponentWithMeta } from 'app/features/plugins/extensions/usePluginComponents';
 import { configureStore } from 'app/store/configureStore';
 
 import { getMockDataSource, getMockDataSourceMeta, getMockDataSourceSettingsState } from '../__mocks__';
@@ -13,9 +13,8 @@ import { readOnlyMessage } from './DataSourceReadOnlyMessage';
 import { EditDataSourceView, ViewProps } from './EditDataSource';
 
 jest.mock('@grafana/runtime', () => {
-  const original = jest.requireActual('@grafana/runtime');
   return {
-    ...original,
+    ...jest.requireActual('@grafana/runtime'),
     getDataSourceSrv: jest.fn(() => ({
       getInstanceSettings: (uid: string) => ({
         uid,
@@ -57,6 +56,10 @@ describe('<EditDataSource>', () => {
         getScope: () => ({ $watch: () => {} }),
       }),
     });
+  });
+
+  beforeEach(() => {
+    setPluginComponentsHook(jest.fn().mockReturnValue({ isLoading: false, components: [] }));
   });
 
   describe('On loading errors', () => {
@@ -259,6 +262,111 @@ describe('<EditDataSource>', () => {
       expect(screen.queryByText(message)).toBeVisible();
       expect(screen.queryByText(detailsMessage)).not.toBeInTheDocument();
       expect(screen.queryByText(detailsVerboseMessage)).toBeInTheDocument();
+    });
+  });
+
+  describe('when extending the datasource config form', () => {
+    it('should be possible to extend the form with a "component" extension in case the plugin ID is whitelisted', () => {
+      const message = "I'm a UI extension component!";
+
+      setPluginComponentsHook(
+        jest.fn().mockReturnValue({
+          isLoading: false,
+          components: [
+            createComponentWithMeta(
+              {
+                pluginId: 'grafana-pdc-app',
+                title: 'Example component',
+                description: 'Example description',
+                component: () => <div>{message}</div>,
+              },
+              '1'
+            ),
+          ],
+        })
+      );
+
+      setup({
+        dataSourceRights: {
+          readOnly: false,
+          hasDeleteRights: true,
+          hasWriteRights: true,
+        },
+      });
+
+      expect(screen.queryByText(message)).toBeVisible();
+    });
+
+    it('should NOT be possible to extend the form with a "component" extension in case the plugin ID is NOT whitelisted', () => {
+      const message = "I'm a UI extension component!";
+
+      setPluginComponentsHook(
+        jest.fn().mockReturnValue({
+          isLoading: false,
+          components: [
+            createComponentWithMeta(
+              {
+                pluginId: 'myorg-basic-app',
+                title: 'Example component',
+                description: 'Example description',
+                component: () => <div>{message}</div>,
+              },
+              '1'
+            ),
+          ],
+        })
+      );
+
+      setup({
+        dataSourceRights: {
+          readOnly: false,
+          hasDeleteRights: true,
+          hasWriteRights: true,
+        },
+      });
+
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+    });
+
+    it('should pass a context prop to the rendered UI extension component', () => {
+      const message = "I'm a UI extension component!";
+      const component = jest.fn().mockReturnValue(<div>{message}</div>);
+
+      setPluginComponentsHook(
+        jest.fn().mockReturnValue({
+          isLoading: false,
+          components: [
+            createComponentWithMeta(
+              {
+                pluginId: 'grafana-pdc-app',
+                title: 'Example component',
+                description: 'Example description',
+                component,
+              },
+              '1'
+            ),
+          ],
+        })
+      );
+
+      setup({
+        dataSourceRights: {
+          readOnly: false,
+          hasDeleteRights: true,
+          hasWriteRights: true,
+        },
+      });
+
+      expect(component).toHaveBeenCalled();
+
+      const props = component.mock.calls[0][0];
+
+      expect(props.context).toBeDefined();
+      expect(props.context.dataSource).toBeDefined();
+      expect(props.context.dataSourceMeta).toBeDefined();
+      expect(props.context.setJsonData).toBeDefined();
+      expect(props.context.setSecureJsonData).toBeDefined();
+      expect(props.context.testingStatus).toBeDefined();
     });
   });
 });

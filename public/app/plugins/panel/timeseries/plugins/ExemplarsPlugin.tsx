@@ -1,17 +1,15 @@
-import React, { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import uPlot from 'uplot';
 
 import {
   DataFrame,
   DataFrameFieldIndex,
-  Field,
   Labels,
-  LinkModel,
   TIME_SERIES_TIME_FIELD_NAME,
   TIME_SERIES_VALUE_FIELD_NAME,
   TimeZone,
 } from '@grafana/data';
-import { EventsCanvas, FIXED_UNIT, UPlotConfigBuilder } from '@grafana/ui';
+import { FIXED_UNIT, EventsCanvas, UPlotConfigBuilder } from '@grafana/ui';
 
 import { ExemplarMarker } from './ExemplarMarker';
 
@@ -19,18 +17,14 @@ interface ExemplarsPluginProps {
   config: UPlotConfigBuilder;
   exemplars: DataFrame[];
   timeZone: TimeZone;
-  getFieldLinks: (field: Field, rowIndex: number) => Array<LinkModel<Field>>;
   visibleSeries?: VisibleExemplarLabels;
+  maxHeight?: number;
 }
 
-export const ExemplarsPlugin = ({
-  exemplars,
-  timeZone,
-  getFieldLinks,
-  config,
-  visibleSeries,
-}: ExemplarsPluginProps) => {
+export const ExemplarsPlugin = ({ exemplars, timeZone, config, visibleSeries, maxHeight }: ExemplarsPluginProps) => {
   const plotInstance = useRef<uPlot>();
+
+  const [lockedExemplarFieldIndex, setLockedExemplarFieldIndex] = useState<DataFrameFieldIndex | undefined>();
 
   useLayoutEffect(() => {
     config.addHook('init', (u) => {
@@ -53,7 +47,7 @@ export const ExemplarsPlugin = ({
     const yMin = plotInstance.current.scales[yScale].min;
     const yMax = plotInstance.current.scales[yScale].max;
 
-    let y = value.values.get(dataFrameFieldIndex.fieldIndex);
+    let y = value.values[dataFrameFieldIndex.fieldIndex];
     // To not to show exemplars outside of the graph we set the y value to min if it is smaller and max if it is bigger than the size of the graph
     if (yMin != null && y < yMin) {
       y = yMin;
@@ -64,7 +58,7 @@ export const ExemplarsPlugin = ({
     }
 
     return {
-      x: plotInstance.current.valToPos(time.values.get(dataFrameFieldIndex.fieldIndex), 'x'),
+      x: plotInstance.current.valToPos(time.values[dataFrameFieldIndex.fieldIndex], 'x'),
       y: plotInstance.current.valToPos(y, yScale),
     };
   }, []);
@@ -83,16 +77,18 @@ export const ExemplarsPlugin = ({
 
       return (
         <ExemplarMarker
+          setClickedExemplarFieldIndex={setLockedExemplarFieldIndex}
+          clickedExemplarFieldIndex={lockedExemplarFieldIndex}
           timeZone={timeZone}
-          getFieldLinks={getFieldLinks}
           dataFrame={dataFrame}
           dataFrameFieldIndex={dataFrameFieldIndex}
           config={config}
           exemplarColor={markerColor}
+          maxHeight={maxHeight}
         />
       );
     },
-    [config, timeZone, getFieldLinks, visibleSeries]
+    [config, timeZone, visibleSeries, setLockedExemplarFieldIndex, lockedExemplarFieldIndex, maxHeight]
   );
 
   return (
@@ -138,6 +134,7 @@ interface LabelWithExemplarUIData {
   labels: Labels;
   color?: string;
 }
+
 /**
  * Get color of active series in legend
  */
@@ -154,7 +151,7 @@ const getExemplarColor = (
     });
     if (fields.length) {
       const hasMatch = fields.every((field, index, fields) => {
-        const value = field.values.get(dataFrameFieldIndex.fieldIndex);
+        const value = field.values[dataFrameFieldIndex.fieldIndex];
         return visibleLabel.labels[field.name] === value;
       });
 
@@ -199,7 +196,7 @@ const showExemplarMarker = (
           showMarker = visibleSeries.labels.some((series) => {
             return Object.keys(series.labels).every((label) => {
               const value = series.labels[label];
-              return fields.find((field) => field.values.get(dataFrameFieldIndex.fieldIndex) === value);
+              return fields.find((field) => field.values[dataFrameFieldIndex.fieldIndex] === value);
             });
           });
         }

@@ -1,8 +1,17 @@
 import { css } from '@emotion/css';
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
+import * as React from 'react';
 
-import { GrafanaTheme2, SelectableValue, TransformerRegistryItem, TransformerUIProps } from '@grafana/data';
+import {
+  GrafanaTheme2,
+  SelectableValue,
+  TransformerRegistryItem,
+  TransformerUIProps,
+  TransformerCategory,
+} from '@grafana/data';
 import { InlineField, InlineFieldRow, Select, useStyles2 } from '@grafana/ui';
+
+import { getTransformationContent } from '../docs/getTransformationContent';
 
 import { prepareTimeSeriesTransformer, PrepareTimeSeriesOptions, timeSeriesFormat } from './prepareTimeSeries';
 
@@ -43,7 +52,7 @@ const longInfo = {
     <ul>
       <li>Single frame</li>
       <li>1st field is time field</li>
-      <li>Time in ascending order, but may have duplictes</li>
+      <li>Time in ascending order, but may have duplicates</li>
       <li>String values are represented as separate fields rather than as labels</li>
       <li>Multiple value fields may exist</li>
     </ul>
@@ -101,9 +110,9 @@ export function PrepareTimeSeriesEditor(props: TransformerUIProps<PrepareTimeSer
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  info: css`
-    margin-left: 20px;
-  `,
+  info: css({
+    marginLeft: '20px',
+  }),
 });
 
 export const prepareTimeseriesTransformerRegistryItem: TransformerRegistryItem<PrepareTimeSeriesOptions> = {
@@ -112,11 +121,6 @@ export const prepareTimeseriesTransformerRegistryItem: TransformerRegistryItem<P
   transformation: prepareTimeSeriesTransformer,
   name: prepareTimeSeriesTransformer.name,
   description: prepareTimeSeriesTransformer.description,
-  help: `
-  ### Use cases
-
-  This takes query results and transforms them into a predictable timeseries format.
-  This transformer may be especially useful when using old panels that only expect the
-  many-frame timeseries format.
-  `,
+  categories: new Set([TransformerCategory.Reformat]),
+  help: getTransformationContent(prepareTimeSeriesTransformer.id).helperDocs,
 };

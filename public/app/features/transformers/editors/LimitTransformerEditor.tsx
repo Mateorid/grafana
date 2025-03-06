@@ -1,15 +1,28 @@
-import React, { FormEvent, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
-import { DataTransformerID, standardTransformers, TransformerRegistryItem, TransformerUIProps } from '@grafana/data';
+import {
+  DataTransformerID,
+  standardTransformers,
+  TransformerRegistryItem,
+  TransformerUIProps,
+  TransformerCategory,
+} from '@grafana/data';
 import { LimitTransformerOptions } from '@grafana/data/src/transformations/transformers/limit';
-import { InlineField, InlineFieldRow, Input } from '@grafana/ui';
+import { InlineFieldRow } from '@grafana/ui';
+
+import { getTransformationContent } from '../docs/getTransformationContent';
+import { SuggestionsInput } from '../suggestionsInput/SuggestionsInput';
+import { getVariableSuggestions, numberOrVariableValidator } from '../utils';
 
 export const LimitTransformerEditor = ({ options, onChange }: TransformerUIProps<LimitTransformerOptions>) => {
-  const onSetLimit = useCallback(
-    (value: FormEvent<HTMLInputElement>) => {
+  const [isInvalid, setInvalid] = useState<boolean>(false);
+
+  const onSetVariableLimit = useCallback(
+    (value: string) => {
+      setInvalid(!numberOrVariableValidator(value));
       onChange({
         ...options,
-        limitField: Number(value.currentTarget.value),
+        limitField: value,
       });
     },
     [onChange, options]
@@ -18,15 +31,14 @@ export const LimitTransformerEditor = ({ options, onChange }: TransformerUIProps
   return (
     <>
       <InlineFieldRow>
-        <InlineField label="Limit" labelWidth={8}>
-          <Input
-            placeholder="Limit count"
-            pattern="[0-9]*"
-            value={options.limitField}
-            onChange={onSetLimit}
-            width={25}
-          />
-        </InlineField>
+        <SuggestionsInput
+          invalid={isInvalid}
+          error={'Value needs to be an integer or a variable'}
+          value={String(options.limitField)}
+          onChange={onSetVariableLimit}
+          placeholder="Value or variable"
+          suggestions={getVariableSuggestions()}
+        ></SuggestionsInput>
       </InlineFieldRow>
     </>
   );
@@ -36,6 +48,8 @@ export const limitTransformRegistryItem: TransformerRegistryItem<LimitTransforme
   id: DataTransformerID.limit,
   editor: LimitTransformerEditor,
   transformation: standardTransformers.limitTransformer,
-  name: 'Limit',
+  name: standardTransformers.limitTransformer.name,
   description: `Limit the number of items displayed.`,
+  categories: new Set([TransformerCategory.Filter]),
+  help: getTransformationContent(DataTransformerID.limit).helperDocs,
 };
